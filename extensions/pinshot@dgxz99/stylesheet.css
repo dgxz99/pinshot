@@ -1,4 +1,4 @@
-/* Pinshot 贴图与交互浮层基础样式 */
+/* Pinshot 贴图与交互浮层样式 */
 
 .pinshot-pin {
     border: 1px solid rgba(255, 255, 255, 0.22);
@@ -28,7 +28,7 @@
 .pinshot-panel-badge {
     font-size: 11px;
     font-weight: 700;
-    padding: 0 4px;
+    padding: 0 5px;
     border-radius: 8px;
     background-color: rgba(53, 132, 228, 0.88);
     color: #ffffff;
@@ -37,4 +37,21 @@
 .pinshot-panel-badge-ghost {
     background-color: rgba(230, 159, 0, 0.92);
     color: #111111;
+}
+
+.pinshot-menu-row {
+    spacing: 8px;
+}
+
+.pinshot-menu-title {
+    max-width: 240px;
+}
+
+.pinshot-menu-icon-btn {
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.pinshot-menu-icon-btn:hover {
+    background-color: rgba(255, 255, 255, 0.14);
 }

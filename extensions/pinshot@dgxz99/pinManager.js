@@ -1,76 +1,172 @@
 import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {firePinshot, runPinshotAsync} from './coreRunner.js';
+import {PinActor} from './pinActor.js';
+
+const DEFAULT_PIN_CONFIG = {
+    default_opacity: 1.0,
+    min_scale: 0.2,
+    max_scale: 5.0,
+    zoom_step: 0.1,
+    opacity_step: 0.08,
+    mini_size_px: 64,
+    min_visible_edge_px: 32,
+    max_texture_edge_px: 4096,
+    hide_on_fullscreen: true,
+    follow_all_workspaces: true,
+};
+
 /**
- * 贴图生命周期与顶层非窗口容器管理器（M0 骨架，M1 接入 PinActor 完整渲染）
+ * 贴图生命周期、顶层非窗口容器、全屏避让与多屏回收管理器
  */
 export class PinManager {
     constructor() {
         this._pins = new Map();
+        this._config = {...DEFAULT_PIN_CONFIG};
         this._userHidden = false;
         this._systemHidden = false;
+        this._onStateChanged = null;
+        this._destroyed = false;
+
         this._container = new Clutter.Actor({
             name: 'pinshot-overlay-container',
             reactive: false,
         });
         Main.layoutManager.uiGroup.add_child(this._container);
+
+        this._fullscreenSignalId = global.display.connect('in-fullscreen-changed', () => {
+            this._syncFullscreenVisibility();
+        });
+        this._monitorsSignalId = Main.layoutManager.connect('monitors-changed', () => {
+            this._handleMonitorsChanged();
+        });
+
+        this._loadConfigAsync();
+    }
+
+    setStateChangedHandler(handler) {
+        this._onStateChanged = handler;
+    }
+
+    isUserHidden() {
+        return this._userHidden;
+    }
+
+    async _loadConfigAsync() {
+        const result = await runPinshotAsync(['internal', 'get-pin-config']);
+        if (this._destroyed || !result.ok || !result.stdout.trim()) {
+            return;
+        }
+        try {
+            const parsed = JSON.parse(result.stdout);
+            this._config = {...DEFAULT_PIN_CONFIG, ...parsed};
+            this._syncFullscreenVisibility();
+        } catch (err) {
+            console.warn(`[pinshot] 解析前端配置 JSON 失败，继续使用默认值: ${err}`);
+        }
     }
 
     createPin(payload) {
-        if (!payload || !payload.id) {
+        if (this._destroyed || !payload || !payload.id) {
             return false;
         }
-        // M0 阶段记录状态占位，M1 将替换为真实 PinActor 非窗口渲染
-        this._pins.set(payload.id, {
-            id: payload.id,
-            x: payload.initial_pos?.x ?? 0,
-            y: payload.initial_pos?.y ?? 0,
-            width: Math.round(payload.width / (payload.source_scale || 1.0)),
-            height: Math.round(payload.height / (payload.source_scale || 1.0)),
-            scale: 1.0,
-            opacity: 1.0,
-            mini: false,
-            ghost: false,
-            hidden: false,
-            title_preview: payload.title_preview ?? '',
-            kind: payload.kind ?? 'screenshot',
-            has_text: Boolean(payload.has_text),
+
+        if (this._pins.has(payload.id)) {
+            return this.updatePin(payload.id, payload);
+        }
+
+        const pin = new PinActor(payload, this._config, {
+            onRequestClose: id => this.closePin(id, {notifyCore: true}),
+            onRaise: actorObj => this._raisePin(actorObj),
+            onChanged: () => this._notifyStateChanged(),
         });
+
+        this._pins.set(payload.id, pin);
+        this._container.add_child(pin.actor);
+        this._syncFullscreenVisibility();
+        this._notifyStateChanged();
         return true;
     }
 
     updatePin(id, payload) {
-        if (!this._pins.has(id)) {
-            return this.createPin(payload);
+        if (this._destroyed || !payload) {
+            return false;
         }
-        const existing = this._pins.get(id);
-        this._pins.set(id, {
-            ...existing,
-            width: Math.round(payload.width / (payload.source_scale || 1.0)),
-            height: Math.round(payload.height / (payload.source_scale || 1.0)),
-            title_preview: payload.title_preview ?? existing.title_preview,
-            has_text: Boolean(payload.has_text),
-            hidden: false,
-        });
+        const pin = this._pins.get(id);
+        if (!pin) {
+            return this.createPin({...payload, id});
+        }
+        pin.updatePayload(payload);
+        this._raisePin(pin);
+        this._notifyStateChanged();
         return true;
     }
 
     setPinTemporaryHidden(id, hidden) {
-        const entry = this._pins.get(id);
-        if (!entry) {
+        const pin = this._pins.get(id);
+        if (!pin) {
             return false;
         }
-        entry.hidden = hidden;
+        pin.setTemporaryHidden(hidden);
+        this._notifyStateChanged();
         return true;
     }
 
-    closePin(id) {
-        return this._pins.delete(id);
+    setPinGhost(id, enabled) {
+        const pin = this._pins.get(id);
+        if (!pin) {
+            return false;
+        }
+        pin.setGhost(enabled);
+        this._notifyStateChanged();
+        return true;
+    }
+
+    /**
+     * 点击顶栏贴图项时恢复显示：解除穿透、若处于迷你态则展开并置前
+     */
+    focusOrRevealPin(id) {
+        const pin = this._pins.get(id);
+        if (!pin) {
+            return;
+        }
+        if (this._userHidden) {
+            this._userHidden = false;
+            this._syncContainerVisibility();
+        }
+        if (pin.ghost) {
+            pin.setGhost(false);
+        }
+        if (pin.mini) {
+            pin.toggleMini();
+        }
+        this._raisePin(pin);
+        this._notifyStateChanged();
+    }
+
+    closePin(id, options = {}) {
+        const {notifyCore = false} = options;
+        const pin = this._pins.get(id);
+        if (!pin) {
+            return false;
+        }
+
+        this._pins.delete(id);
+        pin.destroy();
+
+        if (notifyCore) {
+            firePinshot(['internal', 'mark-closed', id]);
+        }
+
+        this._notifyStateChanged();
+        return true;
     }
 
     toggleHideAll() {
         this._userHidden = !this._userHidden;
         this._syncContainerVisibility();
+        this._notifyStateChanged();
         return this._userHidden;
     }
 
@@ -84,19 +180,31 @@ export class PinManager {
         let count = 0;
         for (const pin of this._pins.values()) {
             if (pin.ghost) {
-                pin.ghost = false;
+                pin.setGhost(false);
                 count += 1;
             }
+        }
+        if (count > 0) {
+            this._notifyStateChanged();
         }
         return count;
     }
 
+    collapseAllToMini() {
+        for (const pin of this._pins.values()) {
+            if (!pin.mini) {
+                pin.toggleMini();
+            }
+        }
+        this._notifyStateChanged();
+    }
+
     listActivePins() {
-        return Array.from(this._pins.values());
+        return Array.from(this._pins.values(), pin => pin.toInfo());
     }
 
     selectRegion() {
-        // M3 阶段由 regionSelector.js 提供真实交互框选
+        // M3 阶段由 regionSelector.js 提供透明全屏框选遮罩
         return {
             cancelled: true,
             monitor_index: 0,
@@ -109,8 +217,17 @@ export class PinManager {
     }
 
     updateLongshotHud(_state) {
-        // M3 阶段由 longshotHud.js 实现悬浮控制条
+        // M3 阶段由 longshotHud.js 渲染长图悬浮控制条
         return true;
+    }
+
+    _raisePin(pin) {
+        if (!this._container || !pin?.actor) {
+            return;
+        }
+        if (pin.actor.get_parent() === this._container) {
+            this._container.set_child_above_sibling(pin.actor, null);
+        }
     }
 
     _syncContainerVisibility() {
@@ -120,11 +237,71 @@ export class PinManager {
         this._container.visible = !(this._userHidden || this._systemHidden);
     }
 
+    _syncFullscreenVisibility() {
+        if (this._destroyed) {
+            return;
+        }
+        const monitors = Main.layoutManager.monitors;
+        for (const pin of this._pins.values()) {
+            if (!this._config.hide_on_fullscreen) {
+                pin.setFullscreenHidden(false);
+                continue;
+            }
+            const idx = pin.getMonitorIndex();
+            const monitor = monitors[idx];
+            pin.setFullscreenHidden(Boolean(monitor?.inFullscreen));
+        }
+    }
+
+    _handleMonitorsChanged() {
+        if (this._destroyed) {
+            return;
+        }
+        for (const pin of this._pins.values()) {
+            pin.ensureVisibleOnMonitors();
+        }
+        this._syncFullscreenVisibility();
+    }
+
+    _notifyStateChanged() {
+        if (this._onStateChanged) {
+            this._onStateChanged();
+        }
+    }
+
     /**
-     * 销毁全部贴图与顶层容器，确保禁用扩展后零残留
+     * 销毁全部贴图、断开全局监听并移除顶层容器，确保零内存残留
      */
     destroy() {
+        if (this._destroyed) {
+            return;
+        }
+        this._destroyed = true;
+        this._onStateChanged = null;
+
+        if (this._fullscreenSignalId) {
+            try {
+                global.display.disconnect(this._fullscreenSignalId);
+            } catch (err) {
+                console.warn(`[pinshot] 断开全屏监听信号失败: ${err}`);
+            }
+            this._fullscreenSignalId = 0;
+        }
+
+        if (this._monitorsSignalId) {
+            try {
+                Main.layoutManager.disconnect(this._monitorsSignalId);
+            } catch (err) {
+                console.warn(`[pinshot] 断开显示器热插拔信号失败: ${err}`);
+            }
+            this._monitorsSignalId = 0;
+        }
+
+        for (const pin of this._pins.values()) {
+            pin.destroy();
+        }
         this._pins.clear();
+
         if (this._container) {
             const parent = this._container.get_parent();
             if (parent) {

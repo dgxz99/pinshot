@@ -1,8 +1,14 @@
 use std::collections::HashSet;
+use std::fs;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use pinshot_core::capture;
+use pinshot_core::clipboard::{self, ClipboardContent};
+use pinshot_core::protocol::PinKind;
+use pinshot_core::store::NewEntryRequest;
+use pinshot_core::text_render;
 use pinshot_core::{notify, Config, FrontendClient, PinStore};
 
 #[derive(Debug, Parser)]
@@ -22,11 +28,11 @@ enum Commands {
     Ping,
     /// 显示当前配置路径、缓存统计与前端连接状态
     Status,
-    /// 区域截屏并直接贴图（M1 实现）
+    /// 区域截屏并直接贴图
     CapturePin,
-    /// 区域截屏并进入 satty 标注（M1/M2 实现）
+    /// 区域截屏并进入 satty 标注（M2 完善）
     CaptureEdit,
-    /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图（M1 实现）
+    /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
     /// 启动滚动长图录制与实时拼接（M3 实现）
     Longshot,
@@ -66,6 +72,8 @@ enum InternalCommands {
     DeleteHistory { id: String },
     /// 以 JSON 格式输出最近历史条目，供顶栏菜单渲染
     ListHistory { limit: Option<usize> },
+    /// 输出前端渲染所需的 `[pin]` 配置 JSON
+    GetPinConfig,
     /// 按 ID 从历史缓存重新弹出贴图
     RestorePin { id: String },
     /// 若配置开启 restore_on_startup，则恢复上次活跃贴图
@@ -82,15 +90,11 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Ping => cmd_ping(),
         Commands::Status => cmd_status(),
-        Commands::CapturePin => {
-            anyhow::bail!("capture-pin 将在 M1 阶段接入 Portal 截屏实现");
-        }
+        Commands::CapturePin => cmd_capture_pin(),
         Commands::CaptureEdit => {
-            anyhow::bail!("capture-edit 将在 M1/M2 阶段接入 Portal 与 satty 实现");
+            anyhow::bail!("capture-edit 将在 M2 阶段接入完整 satty 标注回流状态机");
         }
-        Commands::PinClipboard => {
-            anyhow::bail!("pin-clipboard 将在 M1 阶段接入剪贴板与 Pango 渲染实现");
-        }
+        Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::Longshot => {
             anyhow::bail!("longshot 将在 M3 阶段接入滚动长图引擎实现");
         }
@@ -132,6 +136,94 @@ fn cmd_status() -> Result<()> {
         Err(err) => {
             println!("前端状态: 离线 ({err})");
         }
+    }
+
+    Ok(())
+}
+
+fn cmd_capture_pin() -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    let store = PinStore::open_default()?;
+
+    let Some(captured) = capture::capture_interactive_region()? else {
+        return Ok(());
+    };
+
+    let record = store.add_png_entry(
+        NewEntryRequest {
+            kind: PinKind::Screenshot,
+            png_bytes: &captured.png_bytes,
+            text_content: None,
+            title_preview: "区域截图".to_string(),
+            source_scale: captured.source_scale,
+            active: true,
+        },
+        &cfg.cache,
+    )?;
+
+    push_pin_to_frontend(&store, &record)?;
+    Ok(())
+}
+
+fn cmd_pin_clipboard() -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    let store = PinStore::open_default()?;
+
+    let record = match clipboard::read_clipboard()? {
+        ClipboardContent::Empty => {
+            notify::info("pinshot", "剪贴板为空或不包含支持贴图的图片与文本");
+            return Ok(());
+        }
+        ClipboardContent::Image {
+            png_bytes,
+            title_preview,
+        } => store.add_png_entry(
+            NewEntryRequest {
+                kind: PinKind::ClipboardImage,
+                png_bytes: &png_bytes,
+                text_content: None,
+                title_preview,
+                source_scale: 1.0,
+                active: true,
+            },
+            &cfg.cache,
+        )?,
+        ClipboardContent::Text(raw_text) => {
+            let rendered = text_render::render_text_card(&raw_text, &cfg.text_card)?;
+            store.add_png_entry(
+                NewEntryRequest {
+                    kind: PinKind::ClipboardText,
+                    png_bytes: &rendered.png_bytes,
+                    text_content: Some(&raw_text),
+                    title_preview: rendered.title_preview,
+                    source_scale: rendered.source_scale,
+                    active: true,
+                },
+                &cfg.cache,
+            )?
+        }
+    };
+
+    push_pin_to_frontend(&store, &record)?;
+    Ok(())
+}
+
+/// 将已入库记录推送到前端展示；若推送失败则降级为历史条目防丢失并提示用户
+fn push_pin_to_frontend(store: &PinStore, record: &pinshot_core::store::PinRecord) -> Result<()> {
+    let result = FrontendClient::connect().and_then(|client| {
+        let ok = client.create_pin(&record.to_payload(None))?;
+        if !ok {
+            return Err(pinshot_core::PinshotError::Dbus(
+                "前端拒绝创建贴图".to_string(),
+            ));
+        }
+        Ok(())
+    });
+
+    if let Err(err) = result {
+        let _ = store.mark_closed(&record.id);
+        notify::warn("pinshot 贴图失败", &err.to_string());
+        return Err(err.into());
     }
 
     Ok(())
@@ -196,10 +288,27 @@ fn cmd_clear_history(all: bool) -> Result<()> {
 fn handle_internal(action: InternalCommands) -> Result<()> {
     match action {
         InternalCommands::CopyImage { id } => {
-            anyhow::bail!("internal copy-image ({id}) 将在 M1 阶段实现");
+            let store = PinStore::open_default()?;
+            let record = store
+                .get(&id)?
+                .with_context(|| format!("未找到贴图记录: {id}"))?;
+            clipboard::copy_png_file(&record.image_path)?;
+            notify::info("pinshot", "已复制图片到剪贴板");
+            Ok(())
         }
         InternalCommands::CopyText { id } => {
-            anyhow::bail!("internal copy-text ({id}) 将在 M1 阶段实现");
+            let store = PinStore::open_default()?;
+            let record = store
+                .get(&id)?
+                .with_context(|| format!("未找到贴图记录: {id}"))?;
+            let text_path = record
+                .text_path
+                .with_context(|| format!("贴图 {id} 不包含原始文本"))?;
+            let text = fs::read_to_string(&text_path)
+                .with_context(|| format!("读取原文失败: {}", text_path.display()))?;
+            clipboard::copy_text(&text)?;
+            notify::info("pinshot", "已复制原始文本到剪贴板");
+            Ok(())
         }
         InternalCommands::SaveImage { id } => {
             let cfg = Config::load_or_init()?;
@@ -207,10 +316,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             let save_dir = cfg.resolved_save_dir()?;
             let saved_path = store.save_to_user_dir(&id, &save_dir)?;
             if cfg.general.notify_on_save {
-                notify::info(
-                    "pinshot 已保存原图",
-                    &saved_path.to_string_lossy(),
-                );
+                notify::info("pinshot 已保存原图", &saved_path.to_string_lossy());
             }
             println!("{}", saved_path.display());
             Ok(())
@@ -238,6 +344,11 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 .map(|rec| rec.to_summary())
                 .collect();
             println!("{}", serde_json::to_string(&summaries)?);
+            Ok(())
+        }
+        InternalCommands::GetPinConfig => {
+            let cfg = Config::load_or_init()?;
+            println!("{}", serde_json::to_string(&cfg.pin)?);
             Ok(())
         }
         InternalCommands::RestorePin { id } => {

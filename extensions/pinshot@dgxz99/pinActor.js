@@ -59,7 +59,7 @@ export class PinActor {
             name: `pinshot-pin-${this.id}`,
             style_class: 'pinshot-pin',
             reactive: true,
-            can_focus: false,
+            can_focus: true,
             layout_manager: new Clutter.BinLayout(),
         });
 

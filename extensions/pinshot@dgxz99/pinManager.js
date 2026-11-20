@@ -112,6 +112,9 @@ export class PinManager {
         if (!pin) {
             return false;
         }
+        if (hidden && pin === this._selectedPin) {
+            this._selectPin(null);
+        }
         pin.setTemporaryHidden(hidden);
         this._notifyStateChanged();
         return true;
@@ -230,9 +233,16 @@ export class PinManager {
 
     _selectPin(pin) {
         if (this._selectedPin !== pin) {
-            this._selectedPin?.setSelected(false);
+            const previous = this._selectedPin;
+            previous?.setSelected(false);
             this._selectedPin = pin;
-            pin?.setSelected(true);
+            if (pin) {
+                pin.setSelected(true);
+                // 仅在主动选中时获取 Shell 键盘焦点，否则按键仍发往应用窗口
+                pin.actor.grab_key_focus();
+            } else if (previous && global.stage.get_key_focus() === previous.actor) {
+                global.stage.set_key_focus(null);
+            }
         }
     }
 
@@ -251,7 +261,8 @@ export class PinManager {
             if (hit !== pin.actor) {
                 this._selectPin(null);
             }
-        } else if (event.type() === Clutter.EventType.KEY_PRESS) {
+        } else if (event.type() === Clutter.EventType.KEY_PRESS &&
+            global.stage.get_key_focus() === pin.actor) {
             const key = event.get_key_symbol();
             const modifiers = event.get_state() & (Clutter.ModifierType.CONTROL_MASK |
                 Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
@@ -302,7 +313,11 @@ export class PinManager {
         if (!this._container) {
             return;
         }
-        this._container.visible = !(this._userHidden || this._systemHidden);
+        const visible = !(this._userHidden || this._systemHidden);
+        if (!visible) {
+            this._selectPin(null);
+        }
+        this._container.visible = visible;
     }
 
     _syncFullscreenVisibility() {

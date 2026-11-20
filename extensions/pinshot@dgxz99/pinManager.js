@@ -43,6 +43,7 @@ export class PinManager {
         });
 
         this._selectedPin = null;
+        this._selectionGrab = null;
         this._selectionSignalId = global.stage.connect('captured-event',
             (_stage, event) => this._handleSelectionEvent(event));
         this._loadConfigAsync();
@@ -232,18 +233,23 @@ export class PinManager {
     }
 
     _selectPin(pin) {
-        if (this._selectedPin !== pin) {
-            const previous = this._selectedPin;
-            previous?.setSelected(false);
-            this._selectedPin = pin;
-            if (pin) {
-                pin.setSelected(true);
-                // 仅在主动选中时获取 Shell 键盘焦点，否则按键仍发往应用窗口
-                pin.actor.grab_key_focus();
-            } else if (previous && global.stage.get_key_focus() === previous.actor) {
-                global.stage.set_key_focus(null);
-            }
+        if (this._selectedPin === pin) {
+            return;
         }
+        this._selectedPin?.setSelected(false);
+        this._selectedPin = null;
+        if (this._selectionGrab) {
+            Main.popModal(this._selectionGrab);
+            this._selectionGrab = null;
+        }
+        if (!pin) {
+            return;
+        }
+
+        // Shell 内部焦点不改变 Wayland 客户端的键盘路由，选中期间需由 Shell 接管输入
+        this._selectionGrab = Main.pushModal(pin.actor);
+        this._selectedPin = pin;
+        pin.setSelected(true);
     }
 
     _handleSelectionEvent(event) {
@@ -258,7 +264,7 @@ export class PinManager {
         if (event.type() === Clutter.EventType.BUTTON_PRESS) {
             const [x, y] = event.get_coords();
             const hit = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
-            if (hit !== pin.actor) {
+            if (hit !== pin.actor || event.get_button() === Clutter.BUTTON_SECONDARY) {
                 this._selectPin(null);
             }
         } else if (event.type() === Clutter.EventType.KEY_PRESS &&

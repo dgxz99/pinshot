@@ -1,0 +1,40 @@
+/* Pinshot 贴图与交互浮层基础样式 */
+
+.pinshot-pin {
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+    background-color: rgba(20, 20, 24, 0.92);
+}
+
+.pinshot-pin-selected {
+    border: 1px solid #3584e4;
+    box-shadow: 0 0 0 1px rgba(53, 132, 228, 0.55), 0 8px 26px rgba(0, 0, 0, 0.48);
+}
+
+.pinshot-pin-mini {
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.pinshot-pin-ghost {
+    border: 1px dashed rgba(255, 196, 61, 0.85);
+}
+
+.pinshot-panel-box {
+    spacing: 4px;
+}
+
+.pinshot-panel-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 4px;
+    border-radius: 8px;
+    background-color: rgba(53, 132, 228, 0.88);
+    color: #ffffff;
+}
+
+.pinshot-panel-badge-ghost {
+    background-color: rgba(230, 159, 0, 0.92);
+    color: #111111;
+}

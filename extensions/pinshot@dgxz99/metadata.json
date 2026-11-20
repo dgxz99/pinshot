@@ -1,0 +1,9 @@
+{
+    "uuid": "pinshot@dgxz99",
+    "name": "Pinshot",
+    "description": "轻量级 Wayland 真·非窗口贴图与滚动长图前端（GNOME Shell 51）",
+    "author": "dgxz99",
+    "version": 1,
+    "shell-version": ["51"],
+    "url": "https://github.com/dgxz99/pinshot"
+}

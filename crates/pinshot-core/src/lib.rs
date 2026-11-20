@@ -1,3 +1,4 @@
+pub mod annotate;
 pub mod capture;
 pub mod clipboard;
 pub mod config;

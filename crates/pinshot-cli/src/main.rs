@@ -4,12 +4,12 @@ use std::fs;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use pinshot_core::capture;
 use pinshot_core::clipboard::{self, ClipboardContent};
 use pinshot_core::protocol::PinKind;
 use pinshot_core::store::NewEntryRequest;
 use pinshot_core::text_render;
-use pinshot_core::{notify, Config, FrontendClient, PinStore};
+use pinshot_core::{Config, FrontendClient, PinStore, notify};
+use pinshot_core::{annotate, capture};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,7 +30,7 @@ enum Commands {
     Status,
     /// 区域截屏并直接贴图
     CapturePin,
-    /// 区域截屏并进入 satty 标注（M2 完善）
+    /// 区域截屏并在 Satty 标注，确认后复制图片
     CaptureEdit,
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
@@ -91,9 +91,7 @@ fn main() -> Result<()> {
         Commands::Ping => cmd_ping(),
         Commands::Status => cmd_status(),
         Commands::CapturePin => cmd_capture_pin(),
-        Commands::CaptureEdit => {
-            anyhow::bail!("capture-edit 将在 M2 阶段接入完整 satty 标注回流状态机");
-        }
+        Commands::CaptureEdit => cmd_capture_edit(),
         Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::Longshot => {
             anyhow::bail!("longshot 将在 M3 阶段接入滚动长图引擎实现");
@@ -163,6 +161,54 @@ fn cmd_capture_pin() -> Result<()> {
 
     push_pin_to_frontend(&store, &record)?;
     Ok(())
+}
+
+fn cmd_capture_edit() -> Result<()> {
+    if let Some(captured) = capture::capture_interactive_region()?
+        && let Some(edited) = annotate::edit_png(&captured.png_bytes)?
+    {
+        clipboard::copy_png_bytes(&edited)?;
+        notify::info("pinshot", "已复制标注图片到剪贴板");
+    }
+    Ok(())
+}
+
+fn edit_existing_pin(id: &str) -> Result<()> {
+    let config = Config::load_or_init()?;
+    let store = PinStore::open_default()?;
+    let record = store
+        .get(id)?
+        .with_context(|| format!("未找到贴图: {id}"))?;
+    let source = fs::read(&record.image_path)
+        .with_context(|| format!("读取原图失败: {}", record.image_path.display()))?;
+    let frontend = FrontendClient::connect()?;
+    anyhow::ensure!(
+        frontend.set_pin_temporary_hidden(id, true)?,
+        "无法隐藏贴图: {id}"
+    );
+
+    let edit_result = (|| -> Result<()> {
+        if let Some(edited) = annotate::edit_png(&source)? {
+            let updated = store.replace_entry_image(id, &edited, &config.cache)?;
+            anyhow::ensure!(
+                frontend.update_pin(id, &updated.to_payload(None))?,
+                "前端拒绝更新贴图: {id}"
+            );
+        }
+        Ok(())
+    })();
+    let restore_result = (|| -> Result<()> {
+        anyhow::ensure!(
+            frontend.set_pin_temporary_hidden(id, false)?,
+            "无法恢复贴图显示: {id}"
+        );
+        Ok(())
+    })();
+    match (edit_result, restore_result) {
+        (Err(edit), Err(restore)) => Err(edit.context(format!("恢复贴图显示也失败: {restore:#}"))),
+        (Err(err), _) | (_, Err(err)) => Err(err),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 fn cmd_pin_clipboard() -> Result<()> {
@@ -321,9 +367,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             println!("{}", saved_path.display());
             Ok(())
         }
-        InternalCommands::EditSatty { id } => {
-            anyhow::bail!("internal edit-satty ({id}) 将在 M2 阶段实现");
-        }
+        InternalCommands::EditSatty { id } => edit_existing_pin(&id),
         InternalCommands::MarkClosed { id } => {
             let store = PinStore::open_default()?;
             store.mark_closed(&id)?;

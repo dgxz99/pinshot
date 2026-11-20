@@ -168,6 +168,7 @@ export class PinActor {
 
         if (button === Clutter.BUTTON_PRIMARY) {
             this._callbacks?.onRaise?.(this);
+            this._callbacks?.onSelect?.(this);
 
             const nowUs = GLib.get_monotonic_time();
             const dtMs = (nowUs - this._lastClickTimeUs) / 1000;

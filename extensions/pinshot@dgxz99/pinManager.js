@@ -42,6 +42,9 @@ export class PinManager {
             this._handleMonitorsChanged();
         });
 
+        this._selectedPin = null;
+        this._selectionSignalId = global.stage.connect('captured-event',
+            (_stage, event) => this._handleSelectionEvent(event));
         this._loadConfigAsync();
     }
 
@@ -79,6 +82,7 @@ export class PinManager {
         const pin = new PinActor(payload, this._config, {
             onRequestClose: id => this.closePin(id, {notifyCore: true}),
             onRaise: actorObj => this._raisePin(actorObj),
+            onSelect: actorObj => this._selectPin(actorObj),
             onChanged: () => this._notifyStateChanged(),
         });
 
@@ -152,6 +156,9 @@ export class PinManager {
             return false;
         }
 
+        if (pin === this._selectedPin) {
+            this._selectPin(null);
+        }
         this._pins.delete(id);
         pin.destroy();
 
@@ -221,6 +228,67 @@ export class PinManager {
         return true;
     }
 
+    _selectPin(pin) {
+        if (this._selectedPin !== pin) {
+            this._selectedPin?.setSelected(false);
+            this._selectedPin = pin;
+            pin?.setSelected(true);
+        }
+    }
+
+    _handleSelectionEvent(event) {
+        const pin = this._selectedPin;
+        if (!pin) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (pin.ghost || !pin.actor.visible || !this._container.visible) {
+            this._selectPin(null);
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (event.type() === Clutter.EventType.BUTTON_PRESS) {
+            const [x, y] = event.get_coords();
+            const hit = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
+            if (hit !== pin.actor) {
+                this._selectPin(null);
+            }
+        } else if (event.type() === Clutter.EventType.KEY_PRESS) {
+            const key = event.get_key_symbol();
+            const modifiers = event.get_state() & (Clutter.ModifierType.CONTROL_MASK |
+                Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
+                Clutter.ModifierType.SUPER_MASK);
+            if (key === Clutter.KEY_c && modifiers === Clutter.ModifierType.CONTROL_MASK) {
+                firePinshot(['internal', 'copy-image', pin.id]);
+                return Clutter.EVENT_STOP;
+            }
+            if (modifiers !== 0) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+            switch (key) {
+            case Clutter.KEY_e:
+                this._selectPin(null);
+                firePinshot(['internal', 'edit-satty', pin.id]);
+                break;
+            case Clutter.KEY_m:
+                pin.toggleMini();
+                break;
+            case Clutter.KEY_t:
+                this._selectPin(null);
+                pin.setGhost(true);
+                break;
+            case Clutter.KEY_0:
+                pin.resetScaleTo100();
+                break;
+            case Clutter.KEY_Escape:
+                this.closePin(pin.id, {notifyCore: true});
+                break;
+            default:
+                return Clutter.EVENT_PROPAGATE;
+            }
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
     _raisePin(pin) {
         if (!this._container || !pin?.actor) {
             return;
@@ -278,6 +346,8 @@ export class PinManager {
         }
         this._destroyed = true;
         this._onStateChanged = null;
+        global.stage.disconnect(this._selectionSignalId);
+        this._selectPin(null);
 
         if (this._fullscreenSignalId) {
             try {

@@ -1,0 +1,15 @@
+# Rust 构建产物
+/target/
+**/*.rs.bk
+
+# 编辑器与系统临时文件
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# 临时调试与打包产物
+*.zip
+*.log

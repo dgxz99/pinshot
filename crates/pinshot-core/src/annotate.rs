@@ -15,9 +15,9 @@ pub fn edit_png(source: &[u8]) -> Result<Option<Vec<u8>>> {
         .arg(&output)
         .args([
             "--early-exit",
-            "all",
+            "save",
             "--actions-on-enter",
-            "save-to-file,exit",
+            "save-to-file",
             "--actions-on-escape",
             "exit",
         ])

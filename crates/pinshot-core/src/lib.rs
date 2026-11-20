@@ -1,5 +1,7 @@
+pub mod capture;
 pub mod config;
 pub mod dbus_client;
+pub mod desktop;
 pub mod error;
 pub mod notify;
 pub mod protocol;

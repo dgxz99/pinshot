@@ -273,6 +273,13 @@ export class PinManager {
                 firePinshot(['internal', 'copy-image', pin.id]);
                 return Clutter.EVENT_STOP;
             }
+            if ((key === Clutter.KEY_r || key === Clutter.KEY_R) &&
+                modifiers === Clutter.ModifierType.SHIFT_MASK) {
+                if (!(event.get_flags() & Clutter.EventFlags.FLAG_REPEATED)) {
+                    pin.toggleMini();
+                }
+                return Clutter.EVENT_STOP;
+            }
             if (modifiers !== 0) {
                 return Clutter.EVENT_PROPAGATE;
             }
@@ -280,9 +287,6 @@ export class PinManager {
             case Clutter.KEY_e:
                 this._selectPin(null);
                 firePinshot(['internal', 'edit-satty', pin.id]);
-                break;
-            case Clutter.KEY_m:
-                pin.toggleMini();
                 break;
             case Clutter.KEY_t:
                 this._selectPin(null);

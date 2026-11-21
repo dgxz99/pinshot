@@ -82,8 +82,8 @@ export class PinContextMenu {
             pin.resetScaleTo100();
         });
 
-        this._menu.addAction(pin.ghost ? '解除点击穿透' : '开启点击穿透', () => {
-            pin.setGhost(!pin.ghost);
+        this._menu.addAction('开启点击穿透（可从顶栏解除）', () => {
+            pin.setGhost(true);
         });
 
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());

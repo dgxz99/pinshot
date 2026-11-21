@@ -82,8 +82,11 @@ export class PinContextMenu {
             pin.resetScaleTo100();
         });
 
-        this._menu.addAction('开启点击穿透（可从顶栏解除）', () => {
+        this._menu.addAction('开启点击穿透（用全局快捷键解除）', () => {
             pin.setGhost(true);
+        });
+        this._menu.addAction('解除全部点击穿透', () => {
+            firePinshot(['unghost-all']);
         });
 
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());

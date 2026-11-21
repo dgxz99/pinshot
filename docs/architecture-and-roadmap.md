@@ -24,7 +24,7 @@
 | `pango`（`pango-view`） | 剪贴板纯文本/代码卡片高质量渲染 | 短命子进程，中文排版稳定 |
 | `satty` | 图片标注与回流编辑 | 复用现有原生标注工具 |
 | `gstreamer` + `pipewire`（`pipewiresrc`） | 长图录制时拉取 ScreenCast 视频流帧 | 仅长图录制期间按需启动 |
-| GNOME Shell 51（GJS） | 一期非窗口贴图浮层与顶栏管理前端 | 极薄 UI 适配层 |
+| GNOME Shell 51（GJS） | 一期非窗口贴图浮层与快捷键前端 | 极薄 UI 适配层 |
 
 ---
 
@@ -69,7 +69,7 @@
 | - 拖拽 / 滚轮缩放 / 透明度 / 迷你态     |   |   gtk4-layer-shell        |
 | - 点击穿透 / 单击选中键盘控制           |   |   (Overlay 层非窗口)       |
 | - 长图选区框选与悬浮控制条              |   | - SNI 托盘对接 DMS        |
-| - 无贴图自动隐藏的极简顶栏管理中心       |   | - 无活跃贴图自动退出       |
+| - 自定义全局快捷键                    |   | - 无活跃贴图自动退出       |
 +---------------------------------------+   +---------------------------+
 ```
 
@@ -116,7 +116,7 @@
 - `pinshot internal edit-satty <id>`
 - `pinshot internal mark-closed <id>`（更新历史索引为已关闭，供 `restore-last` 捞回）
 - `pinshot internal delete-history <id>`（物理删除图片与索引）
-- `pinshot internal list-history [limit]`（返回最近历史 JSON 供顶栏菜单渲染）
+- `pinshot internal list-history [limit]`（返回最近历史 JSON）
 - `pinshot internal restore-pin <id>`
 - `pinshot internal run-hook <hook_name> <id>`
 - `pinshot internal run-ocr <id>`（二期）
@@ -165,7 +165,6 @@ pinshot/
 │       ├── pinManager.js              # 多贴图 Z-Order、全局显隐/穿透管理、热插拔回收
 │       ├── pinActor.js                # 单贴图非窗口渲染、缩放、迷你态、防泄漏销毁
 │       ├── contextMenu.js             # 贴图右键菜单
-│       ├── panelIndicator.js          # 无贴图自动隐藏的极简顶栏管理中心
 │       ├── regionSelector.js          # 长图纯滚动区域透明框选遮罩
 │       └── longshotHud.js             # 长图悬浮控制条（高度展示、快滚告警、完成/取消）
 └── scripts/
@@ -184,7 +183,7 @@ notify_on_save = true
 [cache]
 max_size_mb = 200          # 缓存目录最大磁盘占用（MB）
 max_age_days = 14          # 缓存最长保留天数
-history_menu_limit = 15    # 顶栏菜单展示最近历史条数
+history_menu_limit = 15    # 历史查询默认返回条数
 
 [pin]
 default_opacity = 1.0
@@ -229,7 +228,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 ### 4.3 持久化存储、滚动清理与隐私保护（`store.rs`）
 - **目录与权限**：`~/.cache/pinshot/` 创建时严格设置 Unix 权限 `0700`（仅当前用户可读写）。
   - `images/<id>.png`：100% 原始无损图片（供复制、保存、`satty` 标注、OCR 使用）。
-  - `thumbs/<id>.png`：前端迷你态及顶栏历史列表用的轻量缩略图（如 128px 以内，几 KB）。
+  - `thumbs/<id>.png`：前端迷你态用的轻量缩略图（如 128px 以内，几 KB）。
   - `texts/<id>.txt`：剪贴板文字转图片时同步保存的原始纯文本。
   - `index.json`：所有贴图与历史条目的元数据（原子写入：先写 `.tmp` 再 `rename`）。
   - `screencast_token`：Portal ScreenCast 复用令牌（权限 `0600`）。
@@ -244,7 +243,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
   - 支持对单条历史执行 `delete-history <id>`，立即物理删除图片、缩略图、文本及索引；
   - 支持 `pinshot clear-history` 一键清空所有非活跃历史（加 `--all` 时连同活跃贴图一起关闭并清空）。
 - **重启后恢复行为**：
-  - 默认 `restore_on_startup = false`：重新登录后不自动弹满屏，上次关机前未关闭的贴图自动排在历史记录最顶部，按 `restore-last` 或点顶栏列表即可一键捞回；
+  - 默认 `restore_on_startup = false`：重新登录后不自动弹满屏，上次关机前未关闭的贴图自动排在历史记录最顶部，运行 `pinshot restore-last` 或绑定对应快捷键即可恢复；
   - 若开启 `restore_on_startup = true`：扩展启动完成时调用 Core 恢复上次 `active = true` 的条目。
 
 ### 4.4 剪贴板处理与文字转图片（`clipboard.rs` & `text_render.rs`）
@@ -330,11 +329,9 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 | 右键菜单 | 右键点击（复制图片 / 复制原文 / `satty` 标注 / 迷你态 / 点击穿透 / 恢复 100% / OCR / 钩子 / 保存 / 关闭） | 仅菜单展开期间捕获点击 |
 | 键盘快捷键 | **单击贴图选中**（显示 1px 主题色高亮描边）后支持：`Ctrl+C` 复制、`E` 标注、`Shift+R` 收起／展开迷你态、`T` 开启穿透、`0` 复原 100%、`Esc` 关闭 | 点贴图外任意位置立即取消选中并归还焦点 |
 
-**点击穿透（Ghost Mode）与三重兜底**：
+**点击穿透（Ghost Mode）**：
 - 开启穿透后设置 `actor.reactive = false` 并自动将不透明度压低（如若当前 `> 0.75` 则温和降至 `0.65`，提示处于穿透态）。
-- **兜底 1**：扩展全局快捷键（默认 `Super+Shift+U`）一键解除全部穿透，终端也可执行 `pinshot unghost-all`；
-- **兜底 2**：顶栏管理中心高亮标出穿透贴图，支持单条或一键解除；
-- **兜底 3**：无贴图外的紧急恢复均不依赖贴图自身鼠标点击。
+- 全局快捷键（默认 `Super+Shift+U`）和终端命令 `pinshot unghost-all` 可解除全部穿透，不依赖贴图焦点。未穿透的贴图也可从右键菜单解除全部穿透。
 
 **扩展快捷键设置**：可在 GNOME「扩展」应用打开 Pinshot 首选项，或运行 `gnome-extensions prefs pinshot@dgxz99`。默认 `Super+Shift+P` 区域截图并贴图、`Super+Shift+V` 剪贴板贴图、`Super+Shift+U` 解除全部穿透。区域截图后标注、显示／隐藏全部贴图、恢复最近贴图默认未绑定。各项可改绑、禁用或恢复默认，不修改 GNOME 系统里的自定义绑定。贴图局部按键只有在 Shell 将键盘事件交给贴图时才生效，也可用右键菜单完成相应操作。
 
@@ -343,13 +340,6 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 2. **超大图/长图纹理降采样**：前端加载显示纹理前检查图片尺寸，若任一边超过 `max_texture_edge_px`（默认 `4096px`）或超过当前显示器物理分辨率的 2 倍，使用 `GdkPixbuf.Pixbuf.new_from_file_at_scale` 按上限等比降采样生成显示纹理；磁盘保留 100% 原图供复制、标注与保存。
 3. **迷你缩略图态释放大图纹理**：贴图切入迷你态时，销毁原高清图像纹理并切换加载几十 KB 的 `thumbs/<id>.png`；展开时再从磁盘毫秒级重新载入清晰纹理。
 4. **严格断连销毁**：每个 `PinActor` 维护全部信号 ID 列表；关闭或扩展 `disable()` 时显式断开所有 Clutter/Stage/Monitor 信号、销毁右键菜单和子节点、清空纹理引用并置 `null`，确保长时间不重启桌面零内存泄漏。
-
-### 5.5 极简顶栏管理中心（`panelIndicator.js`）
-- **自动隐藏策略**：当「活跃贴图数 == 0 且 隐藏贴图数 == 0 且 穿透贴图数 == 0」时，顶栏图标自动隐藏（`visible = false`），保持桌面极致干净。
-- **有状态时显示**：展示简洁图标 + 活跃数量角标（若有穿透贴图附带状态指示）；下拉菜单提供：
-  - 快捷操作区：全部隐藏/显示、一键解除全部穿透、全部收为迷你图；
-  - 当前贴图列表：每项展示小缩略图 + 尺寸/文本摘要 + 状态标签，支持点击展开/解除穿透/关闭；
-  - 最近关闭历史（按需通过 `pinshot internal list-history` 拉取）：支持一键恢复或彻底物理删除单条。
 
 ---
 
@@ -360,7 +350,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 2. **新增极薄 Niri 前端（`crates/pinshot-niri`）**：
    - 使用 `gtk4-rs` + `gtk4-layer-shell`，在 `Layer::Overlay` 创建贴图表面，天然实现「非窗口、永远置顶、不进 DMS 任务栏、跨工作区显示、精确坐标定位与点击穿透（空 input region）」。
    - 实现与 GNOME 前端完全一致的 `io.github.dgxz99.Pinshot.Frontend1` D-Bus 接口；当所有贴图关闭后进程自动退出（回到 0 MB 闲置）。
-   - 有活跃/隐藏/穿透贴图时通过标准 StatusNotifierItem（SNI）向 DMS 顶栏暴露同名管理菜单。
+   - 支持通过 DMS 的全局快捷键调用贴图管理命令。
 
 ---
 
@@ -380,7 +370,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 - **交付内容**：
   - Core：`capture.rs`（Portal 区域抓屏）、`clipboard.rs`（多图片 MIME + `text/uri-list` + 纯文本探测 + 空剪贴板通知）、`text_render.rs`（代码检测、Pango 转义、折行、超长保护、主题自适应）；
   - GNOME 前端：`PinActor` 完整实现（无边框非窗口渲染、分数缩放 1:1 逻辑尺寸、左键拖动、滚轮缩放、`Ctrl+滚轮` 透明度、迷你缩略图、双击左键或中键关闭、右键菜单、4 条内存防泄漏红线）；
-  - 顶栏管理中心（无贴图自动隐藏、列表展示与快速操作）。
+  - 支持通过命令恢复最近贴图。
 - **验收标准**：
   - `pinshot capture-pin` 与 `pinshot pin-clipboard`（图片/代码/中文段落/文件管理器复制图）稳定弹出真·非窗口贴图；
   - 验证贴图不出现在 `aztaskbar`、`CoverflowAltTab`、Overview，不被 `rounded-window-corners` 影响；
@@ -391,13 +381,13 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 - **交付内容**：
   - `annotate.rs`：`satty` 标注回流状态机（临时隐藏 → 保存覆盖并保留旧版进历史 / `Esc` 取消无损恢复）；
   - 键盘防误触（单击选中描边响应快捷键、点外部归还焦点）；
-  - 点击穿透与三重兜底（`unghost-all` + 顶栏一键解除 + 透明度视觉提示）；
+  - 点击穿透（`unghost-all` 恢复与透明度视觉提示）；
   - 全屏应用自动避让隐藏、`toggle-hide`、多图 Z-Order、拖拽 32px 钳制、外接屏热插拔回收；
   - `restore-last` 与重启后历史顶部恢复流程。
 - **验收标准**：
   - 贴图进 `satty` 保存后原地刷新，取消后无损恢复；
   - 打开全屏视频时贴图自动隐藏、退出即回归；
-  - 开启点击穿透后鼠标可直击底层编辑器，并通过快捷键及顶栏均可可靠解除；
+  - 开启点击穿透后鼠标可直击底层编辑器，并通过快捷键及 CLI 均可可靠解除；
   - 模拟重启扩展/会话后，未关闭贴图安静出现在历史顶部且可一键找回。
 
 ### M3：滚动长图（`pinshot longshot`）

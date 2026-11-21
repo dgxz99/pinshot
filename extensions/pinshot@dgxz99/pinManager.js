@@ -26,7 +26,6 @@ export class PinManager {
         this._config = {...DEFAULT_PIN_CONFIG};
         this._userHidden = false;
         this._systemHidden = false;
-        this._onStateChanged = null;
         this._destroyed = false;
 
         this._container = new Clutter.Actor({
@@ -46,14 +45,6 @@ export class PinManager {
         this._selectionSignalId = global.stage.connect('captured-event',
             (_stage, event) => this._handleSelectionEvent(event));
         this._loadConfigAsync();
-    }
-
-    setStateChangedHandler(handler) {
-        this._onStateChanged = handler;
-    }
-
-    isUserHidden() {
-        return this._userHidden;
     }
 
     async _loadConfigAsync() {
@@ -83,13 +74,11 @@ export class PinManager {
             onRequestClose: id => this.closePin(id, {notifyCore: true}),
             onRaise: actorObj => this._raisePin(actorObj),
             onSelect: actorObj => this._selectPin(actorObj),
-            onChanged: () => this._notifyStateChanged(),
         });
 
         this._pins.set(payload.id, pin);
         this._container.add_child(pin.actor);
         this._syncFullscreenVisibility();
-        this._notifyStateChanged();
         return true;
     }
 
@@ -103,7 +92,6 @@ export class PinManager {
         }
         pin.updatePayload(payload);
         this._raisePin(pin);
-        this._notifyStateChanged();
         return true;
     }
 
@@ -116,40 +104,7 @@ export class PinManager {
             this._selectPin(null);
         }
         pin.setTemporaryHidden(hidden);
-        this._notifyStateChanged();
         return true;
-    }
-
-    setPinGhost(id, enabled) {
-        const pin = this._pins.get(id);
-        if (!pin) {
-            return false;
-        }
-        pin.setGhost(enabled);
-        this._notifyStateChanged();
-        return true;
-    }
-
-    /**
-     * 点击顶栏贴图项时恢复显示：解除穿透、若处于迷你态则展开并置前
-     */
-    focusOrRevealPin(id) {
-        const pin = this._pins.get(id);
-        if (!pin) {
-            return;
-        }
-        if (this._userHidden) {
-            this._userHidden = false;
-            this._syncContainerVisibility();
-        }
-        if (pin.ghost) {
-            pin.setGhost(false);
-        }
-        if (pin.mini) {
-            pin.toggleMini();
-        }
-        this._raisePin(pin);
-        this._notifyStateChanged();
     }
 
     closePin(id, options = {}) {
@@ -169,14 +124,12 @@ export class PinManager {
             firePinshot(['internal', 'mark-closed', id]);
         }
 
-        this._notifyStateChanged();
         return true;
     }
 
     toggleHideAll() {
         this._userHidden = !this._userHidden;
         this._syncContainerVisibility();
-        this._notifyStateChanged();
         return this._userHidden;
     }
 
@@ -194,19 +147,7 @@ export class PinManager {
                 count += 1;
             }
         }
-        if (count > 0) {
-            this._notifyStateChanged();
-        }
         return count;
-    }
-
-    collapseAllToMini() {
-        for (const pin of this._pins.values()) {
-            if (!pin.mini) {
-                pin.toggleMini();
-            }
-        }
-        this._notifyStateChanged();
     }
 
     listActivePins() {
@@ -352,12 +293,6 @@ export class PinManager {
         this._syncFullscreenVisibility();
     }
 
-    _notifyStateChanged() {
-        if (this._onStateChanged) {
-            this._onStateChanged();
-        }
-    }
-
     /**
      * 销毁全部贴图、断开全局监听并移除顶层容器，确保零内存残留
      */
@@ -366,7 +301,6 @@ export class PinManager {
             return;
         }
         this._destroyed = true;
-        this._onStateChanged = null;
         global.stage.disconnect(this._selectionSignalId);
         this._selectPin(null);
 

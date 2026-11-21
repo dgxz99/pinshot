@@ -224,7 +224,6 @@ export class PinActor {
             if (type === Clutter.EventType.BUTTON_RELEASE &&
                 event.get_button() === Clutter.BUTTON_PRIMARY) {
                 this._stopDrag();
-                this._callbacks?.onChanged?.();
                 return Clutter.EVENT_STOP;
             }
             return Clutter.EVENT_PROPAGATE;
@@ -271,7 +270,6 @@ export class PinActor {
             const delta = stepSign * this._config.opacity_step;
             this._applyOpacity(this._opacity + delta);
             this._opacityBeforeGhost = this._opacity;
-            this._callbacks?.onChanged?.();
             return Clutter.EVENT_STOP;
         }
 
@@ -282,7 +280,6 @@ export class PinActor {
         const [stageX, stageY] = event.get_coords();
         const factor = stepSign > 0 ? (1 + this._config.zoom_step) : (1 / (1 + this._config.zoom_step));
         this._zoomAroundPoint(this._scale * factor, stageX, stageY);
-        this._callbacks?.onChanged?.();
         return Clutter.EVENT_STOP;
     }
 
@@ -322,7 +319,6 @@ export class PinActor {
         const centerX = this.actor.x + this.actor.width / 2;
         const centerY = this.actor.y + this.actor.height / 2;
         this._zoomAroundPoint(1.0, centerX, centerY);
-        this._callbacks?.onChanged?.();
     }
 
     /**
@@ -369,8 +365,6 @@ export class PinActor {
             const clamped = this._clampPositionToMonitors(targetX, targetY, w, h);
             this.actor.set_position(clamped.x, clamped.y);
         }
-
-        this._callbacks?.onChanged?.();
     }
 
     /**
@@ -396,8 +390,6 @@ export class PinActor {
             this.actor.remove_style_class_name('pinshot-pin-ghost');
             this._applyOpacity(this._opacityBeforeGhost);
         }
-
-        this._callbacks?.onChanged?.();
     }
 
     setSelected(selected) {
@@ -459,8 +451,6 @@ export class PinActor {
             const h = Math.max(24, Math.round(this._baseHeight * this._scale));
             this.actor.set_size(w, h);
         }
-
-        this._callbacks?.onChanged?.();
     }
 
     /**

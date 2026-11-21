@@ -6,7 +6,6 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {firePinshot} from './coreRunner.js';
 import {PinshotDbusService} from './dbusService.js';
-import {PinshotPanelIndicator} from './panelIndicator.js';
 import {PinManager} from './pinManager.js';
 import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 
@@ -16,13 +15,6 @@ import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 export default class PinshotExtension extends Extension {
     enable() {
         this._pinManager = new PinManager();
-        this._panelIndicator = new PinshotPanelIndicator(this._pinManager);
-        this._pinManager.setStateChangedHandler(() => {
-            if (this._panelIndicator) {
-                this._panelIndicator.syncState();
-            }
-        });
-
         this._dbusService = new PinshotDbusService(this._pinManager);
         this._dbusService.enable();
 
@@ -60,11 +52,6 @@ export default class PinshotExtension extends Extension {
         if (this._dbusService) {
             this._dbusService.destroy();
             this._dbusService = null;
-        }
-
-        if (this._panelIndicator) {
-            this._panelIndicator.destroy();
-            this._panelIndicator = null;
         }
 
         if (this._pinManager) {

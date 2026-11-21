@@ -159,7 +159,7 @@ export default class PinshotPreferences extends ExtensionPreferences {
     _createPinControls() {
         const group = new Adw.PreferencesGroup({
             title: '贴图操作速查',
-            description: '局部按键只在贴图接收到键盘事件时生效；也可使用右键菜单。开启穿透后请从顶栏解除单张／全部穿透，或使用上面的全局快捷键。',
+            description: '局部按键只在贴图接收到键盘事件时生效；也可使用右键菜单。开启穿透后可用上面的全局快捷键，或运行 pinshot unghost-all 解除。',
         });
         for (const [title, subtitle] of [
             ['移动贴图', '左键拖动'],

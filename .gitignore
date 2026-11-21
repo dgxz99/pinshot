@@ -10,6 +10,9 @@
 .idea/
 .vscode/
 
+# GNOME 扩展生成的设置 schema
+/extensions/*/schemas/gschemas.compiled
+
 # 临时调试与打包产物
 *.zip
 *.log

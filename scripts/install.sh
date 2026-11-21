@@ -49,6 +49,13 @@ if [[ ! -x "$BIN_SRC" ]]; then
     exit 1
 fi
 
+# GNOME Shell 和扩展首选项均从扩展目录加载编译后的 GSettings schema
+if ! command -v glib-compile-schemas >/dev/null 2>&1; then
+    echo "[pinshot] 未找到 glib-compile-schemas，请先安装 GLib 工具" >&2
+    exit 1
+fi
+glib-compile-schemas --strict "${EXT_SRC_DIR}/schemas"
+
 mkdir -p "${BIN_DIR}" "${EXT_PARENT_DIR}"
 install -m 0755 "${BIN_SRC}" "${BIN_DIR}/pinshot"
 echo "[pinshot] 已安装 CLI: ${BIN_DIR}/pinshot"

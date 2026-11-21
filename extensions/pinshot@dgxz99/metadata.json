@@ -5,5 +5,6 @@
     "author": "dgxz99",
     "version": 1,
     "shell-version": ["51"],
+    "settings-schema": "io.github.dgxz99.pinshot",
     "url": "https://github.com/dgxz99/pinshot"
 }

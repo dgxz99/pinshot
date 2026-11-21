@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="io.github.dgxz99.pinshot" path="/io/github/dgxz99/pinshot/">
+    <key name="pinshot-capture-pin" type="as">
+      <default>['&lt;Super&gt;&lt;Shift&gt;p']</default>
+    </key>
+    <key name="pinshot-pin-clipboard" type="as">
+      <default>['&lt;Super&gt;&lt;Shift&gt;v']</default>
+    </key>
+    <key name="pinshot-capture-edit" type="as">
+      <default>[]</default>
+    </key>
+    <key name="pinshot-toggle-hide" type="as">
+      <default>[]</default>
+    </key>
+    <key name="pinshot-restore-last" type="as">
+      <default>[]</default>
+    </key>
+    <key name="pinshot-unghost-all" type="as">
+      <default>['&lt;Super&gt;&lt;Shift&gt;u']</default>
+    </key>
+  </schema>
+</schemalist>

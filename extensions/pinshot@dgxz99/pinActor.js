@@ -161,6 +161,7 @@ export class PinActor {
         }
 
         if (button === Clutter.BUTTON_SECONDARY) {
+            this._lastClickTimeUs = 0;
             this._callbacks?.onRaise?.(this);
             this._contextMenu.openAt(stageX, stageY);
             return Clutter.EVENT_STOP;
@@ -174,9 +175,10 @@ export class PinActor {
             const dtMs = (nowUs - this._lastClickTimeUs) / 1000;
             const dist = Math.hypot(stageX - this._lastClickX, stageY - this._lastClickY);
 
-            if (dtMs > 0 && dtMs <= DOUBLE_CLICK_MS && dist <= DOUBLE_CLICK_MAX_DELTA) {
+            if (this._lastClickTimeUs !== 0 && dtMs > 0 &&
+                dtMs <= DOUBLE_CLICK_MS && dist <= DOUBLE_CLICK_MAX_DELTA) {
                 this._lastClickTimeUs = 0;
-                this.toggleMini();
+                this._callbacks?.onRequestClose?.(this.id);
                 return Clutter.EVENT_STOP;
             }
 
@@ -207,13 +209,20 @@ export class PinActor {
             const type = event.type();
             if (type === Clutter.EventType.MOTION) {
                 const [curX, curY] = event.get_coords();
-                const nextX = this._dragOriginX + (curX - this._dragStartX);
-                const nextY = this._dragOriginY + (curY - this._dragStartY);
+                const dx = curX - this._dragStartX;
+                const dy = curY - this._dragStartY;
+                // 拖动后立即再点击不应被识别为关闭手势
+                if (Math.hypot(dx, dy) > DOUBLE_CLICK_MAX_DELTA) {
+                    this._lastClickTimeUs = 0;
+                }
+                const nextX = this._dragOriginX + dx;
+                const nextY = this._dragOriginY + dy;
                 const clamped = this._clampPositionToMonitors(nextX, nextY, this.actor.width, this.actor.height);
                 this.actor.set_position(clamped.x, clamped.y);
                 return Clutter.EVENT_STOP;
             }
-            if (type === Clutter.EventType.BUTTON_RELEASE) {
+            if (type === Clutter.EventType.BUTTON_RELEASE &&
+                event.get_button() === Clutter.BUTTON_PRIMARY) {
                 this._stopDrag();
                 this._callbacks?.onChanged?.();
                 return Clutter.EVENT_STOP;
@@ -317,7 +326,7 @@ export class PinActor {
     }
 
     /**
-     * 双击切换迷你缩略图态：切入时立即销毁高清纹理并加载缩略图，展开时从磁盘重新载入
+     * 切换迷你缩略图态：切入时立即销毁高清纹理并加载缩略图，展开时从磁盘重新载入
      */
     toggleMini() {
         if (this._destroyed) {

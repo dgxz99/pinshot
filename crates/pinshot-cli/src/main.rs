@@ -160,13 +160,7 @@ fn cmd_capture_pin() -> Result<()> {
     )?;
 
     push_pin_to_frontend(&store, &record)?;
-    finish_screenshot(
-        &cfg,
-        &output,
-        Some(&record.id),
-        &captured.png_bytes,
-        "已截图并贴图",
-    )
+    finish_screenshot(&cfg, &output, &captured.png_bytes, "已截图并贴图")
 }
 
 fn cmd_capture_edit() -> Result<()> {
@@ -177,7 +171,7 @@ fn cmd_capture_edit() -> Result<()> {
     {
         let output = frontend.screenshot_settings()?;
         clipboard::copy_png_bytes(&edited)?;
-        finish_screenshot(&cfg, &output, None, &edited, "已复制标注图片到剪贴板")?;
+        finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;
     }
     Ok(())
 }
@@ -185,12 +179,11 @@ fn cmd_capture_edit() -> Result<()> {
 fn finish_screenshot(
     cfg: &Config,
     output: &capture::ScreenshotSettings,
-    id: Option<&str>,
     png: &[u8],
     message: &str,
 ) -> Result<()> {
     let saved = if output.auto_save {
-        Some(output.export_png(cfg, id, png)?)
+        Some(output.export_png(cfg, png)?)
     } else {
         None
     };
@@ -396,7 +389,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             let image = fs::File::open(&record.image_path)
                 .with_context(|| format!("读取原图失败: {}", record.image_path.display()))?;
             let output = FrontendClient::connect()?.screenshot_settings()?;
-            let saved_path = output.export_png(&cfg, Some(&record.id), image)?;
+            let saved_path = output.export_png(&cfg, image)?;
             if cfg.general.notify_on_save {
                 notify::info("pinshot 已保存原图", &saved_path.to_string_lossy());
             }

@@ -116,12 +116,12 @@ impl FrontendClient {
 
     /// 查询扩展首选项设置的截图输出策略
     pub fn screenshot_settings(&self) -> Result<ScreenshotSettings> {
-        let (auto_save, save_dir, filename_template, notify) =
+        let (auto_save, save_dir, filename_prefix, notify) =
             self.proxy.get_screenshot_settings().map_err(map_zbus_err)?;
         Ok(ScreenshotSettings {
             auto_save,
             save_dir,
-            filename_template,
+            filename_prefix,
             notify,
         })
     }

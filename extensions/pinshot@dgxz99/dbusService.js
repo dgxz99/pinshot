@@ -53,7 +53,7 @@ const FRONTEND_IFACE_XML = `
     <method name="GetScreenshotSettings">
       <arg type="b" direction="out" name="auto_save"/>
       <arg type="s" direction="out" name="save_dir"/>
-      <arg type="s" direction="out" name="filename_template"/>
+      <arg type="s" direction="out" name="filename_prefix"/>
       <arg type="b" direction="out" name="notify"/>
     </method>
     <method name="SelectRegion">

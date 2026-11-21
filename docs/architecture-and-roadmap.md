@@ -103,7 +103,7 @@
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
 | `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 显示原生截图界面，把用户确认后的 PNG 写入调用方的临时文件 |
-| `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名模板、完成通知设置 |
+| `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `SelectRegion()` | 无 | `s`（JSON：`cancelled`, `monitor_index`, `x`, `y`, `width`, `height`, `scale`） | 长图前由前端提供全屏透明遮罩框选纯滚动内容区域 |
 | `UpdateLongshotHud(state_json)` | `s`（JSON：`active`, `stitched_height`, `warning`, `rect`） | `b` | 更新长图悬浮控制条状态（高度、滚动过快告警） |
 
@@ -340,7 +340,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 
 **截图输出设置**：Pinshot 发起的截图仍使用 GNOME 原生框选、屏幕或窗口截图界面。仅在本次 Pinshot 截图期间，将 PNG 交给 Core 处理，不触发 GNOME 的自动保存和完成通知，也不修改任何 GNOME 设置。原生 `Print` 工作流照常保存和通知。
 
-扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Screenshots`），文件名默认 `pinshot-{id}.png`，已有同名文件不会被覆盖。
+扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Screenshots`），文件名默认为 `pinshot-YYYYMMDD-HHMMSS.png`，以实际保存时的本地时间命名；同一秒重名则追加数字序号，不覆盖旧图。
 
 ### 5.4 前端 4 条内存防泄漏红线
 1. **历史零像素常驻**：贴图关闭后只保留磁盘路径和元数据索引，GJS 中绝不缓存已关闭贴图的 `Cogl.Texture` / `GdkPixbuf`。

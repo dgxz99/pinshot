@@ -455,21 +455,6 @@ impl PinStore {
         Ok(stats)
     }
 
-    /// 将指定贴图 100% 原图复制到用户永久保存目录
-    pub fn save_to_user_dir(&self, id: &str, save_dir: &Path) -> Result<PathBuf> {
-        let record = self
-            .get(id)?
-            .ok_or_else(|| PinshotError::NotFound(id.to_string()))?;
-
-        if !save_dir.exists() {
-            fs::create_dir_all(save_dir).map_err(|e| PinshotError::io(save_dir, e))?;
-        }
-
-        let target = save_dir.join(format!("pinshot-{}.png", record.id));
-        fs::copy(&record.image_path, &target).map_err(|e| PinshotError::io(&target, e))?;
-        Ok(target)
-    }
-
     /// 读取持久化的 ScreenCast restore_token
     pub fn load_screencast_token(&self) -> Result<Option<String>> {
         let path = self.screencast_token_path();

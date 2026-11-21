@@ -15,17 +15,17 @@ import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 export default class PinshotExtension extends Extension {
     enable() {
         this._pinManager = new PinManager();
-        this._dbusService = new PinshotDbusService(this._pinManager);
+        const settings = this.getSettings();
+        this._dbusService = new PinshotDbusService(this._pinManager, settings);
         this._dbusService.enable();
 
-        this._registerShortcuts();
+        this._registerShortcuts(settings);
 
         // 按 config.toml 的 restore_on_startup 决定是否自动恢复上次活跃贴图
         firePinshot(['internal', 'restore-startup']);
     }
 
-    _registerShortcuts() {
-        const settings = this.getSettings();
+    _registerShortcuts(settings) {
         const handlers = {
             'pinshot-toggle-hide': () => this._pinManager.toggleHideAll(),
             'pinshot-unghost-all': () => this._pinManager.unghostAll(),

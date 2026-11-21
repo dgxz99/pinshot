@@ -19,5 +19,17 @@
     <key name="pinshot-unghost-all" type="as">
       <default>['&lt;Super&gt;&lt;Shift&gt;u']</default>
     </key>
+    <key name="screenshot-auto-save" type="b">
+      <default>false</default>
+    </key>
+    <key name="screenshot-save-dir" type="s">
+      <default>''</default>
+    </key>
+    <key name="screenshot-filename" type="s">
+      <default>'pinshot-{id}'</default>
+    </key>
+    <key name="screenshot-notify" type="b">
+      <default>false</default>
+    </key>
   </schema>
 </schemalist>

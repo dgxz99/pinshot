@@ -1,9 +1,14 @@
-use zbus::blocking::Connection;
+use std::fs::File;
+use std::os::fd::AsFd;
 
+use zbus::blocking::Connection;
+use zbus::zvariant::Fd;
+
+use crate::capture::ScreenshotSettings;
 use crate::error::{PinshotError, Result};
 use crate::protocol::{
-    ActivePinInfo, LongshotHudState, PinPayload, RegionSelection, FRONTEND_BUS_NAME,
-    FRONTEND_INTERFACE_NAME, FRONTEND_OBJECT_PATH,
+    ActivePinInfo, FRONTEND_BUS_NAME, FRONTEND_INTERFACE_NAME, FRONTEND_OBJECT_PATH,
+    LongshotHudState, PinPayload, RegionSelection,
 };
 
 #[zbus::proxy(
@@ -23,6 +28,8 @@ trait Frontend1 {
     fn set_system_hidden(&self, hidden: bool) -> zbus::Result<bool>;
     fn unghost_all(&self) -> zbus::Result<u32>;
     fn list_active_pins(&self) -> zbus::Result<String>;
+    fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
+    fn get_screenshot_settings(&self) -> zbus::Result<(bool, String, String, bool)>;
     fn select_region(&self) -> zbus::Result<String>;
     fn update_longshot_hud(&self, state_json: &str) -> zbus::Result<bool>;
 }
@@ -98,6 +105,25 @@ impl FrontendClient {
         let raw = self.proxy.list_active_pins().map_err(map_zbus_err)?;
         let items: Vec<ActivePinInfo> = serde_json::from_str(&raw)?;
         Ok(items)
+    }
+
+    /// 打开原生截图界面并把 PNG 写入调用方的文件；用户取消时返回 0
+    pub(crate) fn capture_screenshot(&self, output: &File) -> Result<f64> {
+        self.proxy
+            .capture_screenshot(Fd::from(output.as_fd()))
+            .map_err(map_zbus_err)
+    }
+
+    /// 查询扩展首选项设置的截图输出策略
+    pub fn screenshot_settings(&self) -> Result<ScreenshotSettings> {
+        let (auto_save, save_dir, filename_template, notify) =
+            self.proxy.get_screenshot_settings().map_err(map_zbus_err)?;
+        Ok(ScreenshotSettings {
+            auto_save,
+            save_dir,
+            filename_template,
+            notify,
+        })
     }
 
     /// 唤起前端全屏透明框选遮罩，返回用户选中的滚动内容矩形

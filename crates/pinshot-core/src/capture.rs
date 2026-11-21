@@ -1,130 +1,122 @@
-use std::collections::HashMap;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{ErrorKind, Read, Seek};
+use std::path::{Path, PathBuf};
 
 use image::ImageFormat;
-use zbus::blocking::Connection;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-use crate::desktop::{decode_file_uri, detect_display_scale};
+use crate::config::{Config, expand_tilde};
+use crate::dbus_client::FrontendClient;
 use crate::error::{PinshotError, Result};
+use crate::store::unix_now_secs;
 
 /// 区域截屏成功后的输出图像
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CapturedImage {
     pub png_bytes: Vec<u8>,
     pub source_scale: f64,
 }
 
-#[zbus::proxy(
-    interface = "org.freedesktop.portal.Screenshot",
-    default_service = "org.freedesktop.portal.Desktop",
-    default_path = "/org/freedesktop/portal/desktop",
-    gen_async = false,
-    gen_blocking = true
-)]
-trait PortalScreenshot {
-    fn screenshot(
+/// 扩展首选项中的 Pinshot 截图输出策略
+#[derive(Debug)]
+pub struct ScreenshotSettings {
+    pub auto_save: bool,
+    pub save_dir: String,
+    pub filename_template: String,
+    pub notify: bool,
+}
+
+impl ScreenshotSettings {
+    /// 导出一份永久文件；同名时保留旧图并为新图追加数字后缀
+    pub fn export_png(
         &self,
-        parent_window: &str,
-        options: HashMap<&str, Value<'_>>,
-    ) -> zbus::Result<OwnedObjectPath>;
-}
-
-#[zbus::proxy(
-    interface = "org.freedesktop.portal.Request",
-    default_service = "org.freedesktop.portal.Desktop",
-    gen_async = false,
-    gen_blocking = true
-)]
-trait PortalRequest {
-    #[zbus(signal)]
-    fn response(&self, response: u32, results: HashMap<String, OwnedValue>) -> zbus::Result<()>;
-}
-
-/// 调用 `org.freedesktop.portal.Screenshot` 进行交互式区域截屏
-///
-/// 返回 `Ok(None)` 表示用户取消了截屏操作
-pub fn capture_interactive_region() -> Result<Option<CapturedImage>> {
-    let conn = Connection::session().map_err(|e| PinshotError::Dbus(e.to_string()))?;
-    let unique_name = conn
-        .unique_name()
-        .ok_or_else(|| PinshotError::Dbus("无法获取 D-Bus 会话连接唯一名称".to_string()))?
-        .as_str()
-        .to_string();
-
-    let handle_token = build_handle_token();
-    let expected_path = build_portal_request_path(&unique_name, &handle_token);
-
-    // 必须在发起 Screenshot 调用之前订阅 Response 信号，避免快速返回时丢失信号
-    let expected_req_proxy = PortalRequestProxy::builder(&conn)
-        .path(expected_path.as_str())
-        .map_err(|e| PinshotError::Dbus(e.to_string()))?
-        .build()
-        .map_err(|e| PinshotError::Dbus(e.to_string()))?;
-    let mut responses = expected_req_proxy
-        .receive_response()
-        .map_err(|e| PinshotError::Dbus(e.to_string()))?;
-
-    let screenshot_proxy =
-        PortalScreenshotProxy::new(&conn).map_err(|e| PinshotError::Dbus(e.to_string()))?;
-    let mut options: HashMap<&str, Value<'_>> = HashMap::new();
-    options.insert("interactive", Value::Bool(true));
-    options.insert("handle_token", Value::from(handle_token.as_str()));
-
-    let actual_path = screenshot_proxy
-        .screenshot("", options)
-        .map_err(|e| PinshotError::Dbus(format!("调用 Portal 截屏失败: {e}")))?;
-
-    // 兼容少数不遵循 handle_token 路径约定的 Portal 实现
-    let signal = if actual_path.as_str() != expected_path {
-        let actual_req_proxy = PortalRequestProxy::builder(&conn)
-            .path(actual_path)
-            .map_err(|e| PinshotError::Dbus(e.to_string()))?
-            .build()
-            .map_err(|e| PinshotError::Dbus(e.to_string()))?;
-        let mut alt_responses = actual_req_proxy
-            .receive_response()
-            .map_err(|e| PinshotError::Dbus(e.to_string()))?;
-        alt_responses.next()
-    } else {
-        responses.next()
-    };
-
-    let Some(msg) = signal else {
-        return Err(PinshotError::Dbus("等待 Portal 截屏响应中断".to_string()));
-    };
-    let args = msg
-        .args()
-        .map_err(|e| PinshotError::Dbus(format!("解析 Portal 截屏响应失败: {e}")))?;
-
-    match args.response {
-        0 => {
-            let uri_val = args
-                .results
-                .get("uri")
-                .ok_or_else(|| PinshotError::Dbus("Portal 截屏响应缺少 uri 字段".to_string()))?;
-            let uri = <&str>::try_from(uri_val).map_err(|e| {
-                PinshotError::Dbus(format!("Portal 截屏 uri 字段不是有效字符串: {e}"))
-            })?;
-            let path = decode_file_uri(uri).ok_or_else(|| {
-                PinshotError::Dbus(format!("无法解码 Portal 截屏返回的 URI: {uri}"))
-            })?;
-
-            let raw_bytes = fs::read(&path).map_err(|e| PinshotError::io(&path, e))?;
-            let png_bytes = ensure_png_bytes(&raw_bytes)?;
-            let source_scale = detect_display_scale();
-
-            Ok(Some(CapturedImage {
-                png_bytes,
-                source_scale,
-            }))
-        }
-        1 => Ok(None),
-        other => Err(PinshotError::Dbus(format!(
-            "Portal 截屏返回异常状态码: {other}"
-        ))),
+        cfg: &Config,
+        id: Option<&str>,
+        mut png: impl Read,
+    ) -> Result<PathBuf> {
+        let stem = screenshot_stem(&self.filename_template, id)?;
+        let dir = if self.save_dir.trim().is_empty() {
+            cfg.resolved_save_dir()?
+        } else {
+            let path = expand_tilde(self.save_dir.trim())?;
+            if !path.is_absolute() {
+                return Err(PinshotError::Config(
+                    "截图保存目录必须为绝对路径或以 ~/ 开头".to_string(),
+                ));
+            }
+            path
+        };
+        fs::create_dir_all(&dir).map_err(|err| PinshotError::io(&dir, err))?;
+        let mut temp =
+            tempfile::NamedTempFile::new_in(&dir).map_err(|err| PinshotError::io(&dir, err))?;
+        std::io::copy(&mut png, temp.as_file_mut())
+            .map_err(|err| PinshotError::io(temp.path(), err))?;
+        persist_unique_png(temp, &dir, &stem)
     }
+}
+
+fn screenshot_stem(template: &str, id: Option<&str>) -> Result<String> {
+    let template = template.trim();
+    let template = if template.is_empty() {
+        "pinshot-{id}"
+    } else {
+        template
+    };
+    let template = template.strip_suffix(".png").unwrap_or(template);
+    let time_id = unix_now_secs().to_string();
+    let stem = template.replace("{id}", id.unwrap_or(&time_id));
+    if stem.trim().is_empty() || stem == "." || stem == ".." || stem.contains(['/', '\0']) {
+        return Err(PinshotError::Config(
+            "截图文件名必须是单个文件名，不能包含路径".to_string(),
+        ));
+    }
+    Ok(stem)
+}
+
+fn persist_unique_png(
+    mut temp: tempfile::NamedTempFile,
+    dir: &Path,
+    stem: &str,
+) -> Result<PathBuf> {
+    let mut suffix = 0;
+    loop {
+        let target = if suffix == 0 {
+            dir.join(format!("{stem}.png"))
+        } else {
+            dir.join(format!("{stem}-{suffix}.png"))
+        };
+        match temp.persist_noclobber(&target) {
+            Ok(_) => return Ok(target),
+            Err(err) if err.error.kind() == ErrorKind::AlreadyExists => {
+                temp = err.file;
+                suffix += 1;
+            }
+            Err(err) => return Err(PinshotError::io(&target, err.error)),
+        }
+    }
+}
+
+/// 打开 GNOME 原生截图界面；匿名临时文件只用来传输 PNG，不在截图目录落盘
+pub fn capture_interactive_region(frontend: &FrontendClient) -> Result<Option<CapturedImage>> {
+    let temp_dir = std::env::temp_dir();
+    let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
+    let source_scale = frontend.capture_screenshot(&file)?;
+    if source_scale == 0.0 {
+        return Ok(None);
+    }
+    if !source_scale.is_finite() || source_scale < 0.0 {
+        return Err(PinshotError::Dbus(format!(
+            "无效的截图缩放：{source_scale}"
+        )));
+    }
+    let mut png_bytes = Vec::new();
+    file.rewind()
+        .map_err(|err| PinshotError::io(&temp_dir, err))?;
+    file.read_to_end(&mut png_bytes)
+        .map_err(|err| PinshotError::io(&temp_dir, err))?;
+    Ok(Some(CapturedImage {
+        png_bytes,
+        source_scale,
+    }))
 }
 
 /// 确保图像字节流为标准 PNG（已是 PNG 时零重编码开销直接复用）
@@ -142,32 +134,54 @@ pub(crate) fn ensure_png_bytes(raw: &[u8]) -> Result<Vec<u8>> {
     Ok(out.into_inner())
 }
 
-fn build_handle_token() -> String {
-    let pid = std::process::id();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("pinshot_{pid}_{nanos}")
-}
-
-fn build_portal_request_path(unique_name: &str, token: &str) -> String {
-    let sender = unique_name
-        .trim_start_matches(':')
-        .replace('.', "_");
-    format!("/org/freedesktop/portal/desktop/request/{sender}/{token}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn build_portal_request_path_converts_dbus_unique_name() {
-        let path = build_portal_request_path(":1.245", "pinshot_42_100");
+    fn filename_accepts_custom_names_and_rejects_paths() {
+        assert_eq!(screenshot_stem("", Some("42")).unwrap(), "pinshot-42");
         assert_eq!(
-            path,
-            "/org/freedesktop/portal/desktop/request/1_245/pinshot_42_100"
+            screenshot_stem("笔记-{id}.png", Some("42")).unwrap(),
+            "笔记-42"
         );
+        assert!(screenshot_stem("../outside", Some("42")).is_err());
+        assert!(screenshot_stem("..", None).is_err());
+        assert!(screenshot_stem(".png", None).is_err());
+    }
+
+    #[test]
+    fn custom_export_keeps_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("我的截图");
+        let settings = ScreenshotSettings {
+            auto_save: true,
+            save_dir: destination.to_string_lossy().into_owned(),
+            filename_template: "截图".into(),
+            notify: false,
+        };
+        let cfg = Config::default();
+        let first = settings.export_png(&cfg, None, &b"first"[..]).unwrap();
+        let second = settings.export_png(&cfg, None, &b"second"[..]).unwrap();
+        assert_eq!(first, destination.join("截图.png"));
+        assert_eq!(second, destination.join("截图-1.png"));
+        assert_eq!(fs::read(first).unwrap(), b"first");
+        assert_eq!(fs::read(second).unwrap(), b"second");
+        assert_eq!(fs::read_dir(destination).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn empty_directory_uses_existing_pinshot_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.general.save_dir = dir.path().to_string_lossy().into_owned();
+        let settings = ScreenshotSettings {
+            auto_save: false,
+            save_dir: String::new(),
+            filename_template: "pinshot-{id}".into(),
+            notify: false,
+        };
+        let saved = settings.export_png(&cfg, Some("42"), &b"png"[..]).unwrap();
+        assert_eq!(saved, dir.path().join("pinshot-42.png"));
     }
 }

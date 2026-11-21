@@ -70,7 +70,7 @@ function findConflict(settings, action, accelerator) {
     return null;
 }
 
-/** 只配置 Pinshot 的全局快捷键，贴图局部操作单独列为速查 */
+/** Pinshot 快捷键、截图输出与贴图操作速查 */
 export default class PinshotPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
@@ -85,6 +85,43 @@ export default class PinshotPreferences extends ExtensionPreferences {
         page.add(shortcuts);
         page.add(this._createPinControls());
         window.add(page);
+        window.add(this._createScreenshotPage(settings));
+    }
+
+    _createScreenshotPage(settings) {
+        const page = new Adw.PreferencesPage({title: '截图', icon_name: 'camera-photo-symbolic'});
+        const group = new Adw.PreferencesGroup({
+            title: 'Pinshot 截图输出',
+            description: '只影响 Pinshot，不改变 GNOME 自带截图。目录和文件名也用于右键「保存原图」，不影响贴图历史。',
+        });
+        const autoSave = new Adw.SwitchRow({
+            title: '自动保存到目录',
+            subtitle: '关闭时，截图贴图仍保留在 Pinshot 历史中；标注结果仍可从剪贴板粘贴。',
+        });
+        settings.bind('screenshot-auto-save', autoSave, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(autoSave);
+
+        const location = new Adw.PreferencesGroup({
+            title: '保存位置和文件名',
+            description: '目录可用绝对路径或 ~/；留空沿用 Pinshot 的配置。文件名留空时使用默认值，可用 {id} 代替编号。扩展名为 .png，重名会自动加后缀。',
+        });
+        for (const [key, title] of [
+            ['screenshot-save-dir', '保存目录（默认 ~/Pictures/Screenshots）'],
+            ['screenshot-filename', '文件名（默认 pinshot-{id}）'],
+        ]) {
+            const row = new Adw.EntryRow({title, show_apply_button: true, text: settings.get_string(key)});
+            row.connect('apply', () => settings.set_string(key, row.text.trim()));
+            location.add(row);
+        }
+        const notify = new Adw.SwitchRow({
+            title: '显示截图完成通知',
+            subtitle: '只控制截图流程的成功通知，不影响 GNOME 自带截图。',
+        });
+        settings.bind('screenshot-notify', notify, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(notify);
+        page.add(group);
+        page.add(location);
+        return page;
     }
 
     _createShortcutRow(window, settings, action) {

@@ -70,7 +70,7 @@ enum InternalCommands {
     MarkClosed { id: String },
     /// 彻底物理删除单条历史及其图片、缩略图、文本
     DeleteHistory { id: String },
-    /// 以 JSON 格式输出最近历史条目，供顶栏菜单渲染
+    /// 以 JSON 格式输出最近历史条目
     ListHistory { limit: Option<usize> },
     /// 输出前端渲染所需的 `[pin]` 配置 JSON
     GetPinConfig,
@@ -141,12 +141,12 @@ fn cmd_status() -> Result<()> {
 
 fn cmd_capture_pin() -> Result<()> {
     let cfg = Config::load_or_init()?;
-    let store = PinStore::open_default()?;
-
-    let Some(captured) = capture::capture_interactive_region()? else {
+    let frontend = FrontendClient::connect()?;
+    let Some(captured) = capture::capture_interactive_region(&frontend)? else {
         return Ok(());
     };
-
+    let output = frontend.screenshot_settings()?;
+    let store = PinStore::open_default()?;
     let record = store.add_png_entry(
         NewEntryRequest {
             kind: PinKind::Screenshot,
@@ -160,15 +160,46 @@ fn cmd_capture_pin() -> Result<()> {
     )?;
 
     push_pin_to_frontend(&store, &record)?;
-    Ok(())
+    finish_screenshot(
+        &cfg,
+        &output,
+        Some(&record.id),
+        &captured.png_bytes,
+        "已截图并贴图",
+    )
 }
 
 fn cmd_capture_edit() -> Result<()> {
-    if let Some(captured) = capture::capture_interactive_region()?
+    let cfg = Config::load_or_init()?;
+    let frontend = FrontendClient::connect()?;
+    if let Some(captured) = capture::capture_interactive_region(&frontend)?
         && let Some(edited) = annotate::edit_png(&captured.png_bytes)?
     {
+        let output = frontend.screenshot_settings()?;
         clipboard::copy_png_bytes(&edited)?;
-        notify::info("pinshot", "已复制标注图片到剪贴板");
+        finish_screenshot(&cfg, &output, None, &edited, "已复制标注图片到剪贴板")?;
+    }
+    Ok(())
+}
+
+fn finish_screenshot(
+    cfg: &Config,
+    output: &capture::ScreenshotSettings,
+    id: Option<&str>,
+    png: &[u8],
+    message: &str,
+) -> Result<()> {
+    let saved = if output.auto_save {
+        Some(output.export_png(cfg, id, png)?)
+    } else {
+        None
+    };
+    if output.notify {
+        let body = saved.map_or_else(
+            || message.to_string(),
+            |path| format!("{message}\n{}", path.display()),
+        );
+        notify::info("Pinshot", &body);
     }
     Ok(())
 }
@@ -359,8 +390,13 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
         InternalCommands::SaveImage { id } => {
             let cfg = Config::load_or_init()?;
             let store = PinStore::open_default()?;
-            let save_dir = cfg.resolved_save_dir()?;
-            let saved_path = store.save_to_user_dir(&id, &save_dir)?;
+            let record = store
+                .get(&id)?
+                .with_context(|| format!("未找到贴图: {id}"))?;
+            let image = fs::File::open(&record.image_path)
+                .with_context(|| format!("读取原图失败: {}", record.image_path.display()))?;
+            let output = FrontendClient::connect()?.screenshot_settings()?;
+            let saved_path = output.export_png(&cfg, Some(&record.id), image)?;
             if cfg.general.notify_on_save {
                 notify::info("pinshot 已保存原图", &saved_path.to_string_lossy());
             }

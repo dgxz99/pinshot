@@ -18,8 +18,8 @@
 | 组件 | 用途 | 备注 |
 |---|---|---|
 | `rust` / `cargo` | 构建 Core 二进制 | 编译期依赖 |
-| `glib-compile-schemas` | 为 GNOME 扩展编译快捷键设置 schema | 安装时由脚本调用 |
-| `xdg-desktop-portal` + `xdg-desktop-portal-gnome` | 区域截屏（`Screenshot`）与长图帧流（`ScreenCast`） | GNOME 原生能力，分数缩放零错位 |
+| `glib-compile-schemas` | 为 GNOME 扩展编译首选项 schema | 安装时由脚本调用 |
+| `xdg-desktop-portal` + `xdg-desktop-portal-gnome` | 长图帧流（`ScreenCast`） | 截图由 GNOME 扩展直接复用原生界面 |
 | `wl-clipboard`（`wl-paste` / `wl-copy`） | 剪贴板读取与写入 | GNOME / Niri 通用 |
 | `pango`（`pango-view`） | 剪贴板纯文本/代码卡片高质量渲染 | 短命子进程，中文排版稳定 |
 | `satty` | 图片标注与回流编辑 | 复用现有原生标注工具 |
@@ -45,7 +45,7 @@
 |                                                                       |
 |  +-------------+  +--------------+  +---------------+  +-----------+  |
 |  |   capture   |  |  clipboard   |  |  text_render  |  |  annotate |  |
-|  | Portal 抓屏  |  | 多MIME读写    |  | Pango代码/卡片 |  | satty回流  |  |
+|  | 前端抓屏     |  | 多MIME读写    |  | Pango代码/卡片 |  | satty回流  |  |
 |  +-------------+  +--------------+  +---------------+  +-----------+  |
 |  +-------------+  +--------------+  +---------------+  +-----------+  |
 |  |  longshot   |  |    store     |  |    config     |  | ocr/hooks |  |
@@ -68,7 +68,7 @@
 | - uiGroup 顶层真·非窗口贴图渲染         |   | - gtk4-rs +               |
 | - 拖拽 / 滚轮缩放 / 透明度 / 迷你态     |   |   gtk4-layer-shell        |
 | - 点击穿透 / 单击选中键盘控制           |   |   (Overlay 层非窗口)       |
-| - 长图选区框选与悬浮控制条              |   | - SNI 托盘对接 DMS        |
+| - 长图选区框选与悬浮控制条              |   | - DMS 快捷键             |
 | - 自定义全局快捷键                    |   | - 无活跃贴图自动退出       |
 +---------------------------------------+   +---------------------------+
 ```
@@ -102,6 +102,8 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
+| `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 显示原生截图界面，把用户确认后的 PNG 写入调用方的临时文件 |
+| `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名模板、完成通知设置 |
 | `SelectRegion()` | 无 | `s`（JSON：`cancelled`, `monitor_index`, `x`, `y`, `width`, `height`, `scale`） | 长图前由前端提供全屏透明遮罩框选纯滚动内容区域 |
 | `UpdateLongshotHud(state_json)` | `s`（JSON：`active`, `stitched_height`, `warning`, `rect`） | `b` | 更新长图悬浮控制条状态（高度、滚动过快告警） |
 
@@ -140,7 +142,7 @@ pinshot/
 │   │       ├── config.rs              # config.toml 加载与默认值
 │   │       ├── store.rs               # 缓存索引、双阈值滚动清理、物理删除
 │   │       ├── dbus_client.rs         # 调用前端 D-Bus 接口
-│   │       ├── capture.rs             # Portal Screenshot 抓屏
+│   │       ├── capture.rs             # 前端截图接收与 PNG 导出
 │   │       ├── clipboard.rs           # wl-clipboard 多 MIME 读写与解析
 │   │       ├── text_render.rs         # 代码检测、Pango 转义、主题感知卡片渲染
 │   │       ├── annotate.rs            # satty 标注回流状态机
@@ -165,6 +167,7 @@ pinshot/
 │       ├── pinManager.js              # 多贴图 Z-Order、全局显隐/穿透管理、热插拔回收
 │       ├── pinActor.js                # 单贴图非窗口渲染、缩放、迷你态、防泄漏销毁
 │       ├── contextMenu.js             # 贴图右键菜单
+│       ├── screenshot.js              # 复用 GNOME 原生截图界面，分离截图输出
 │       ├── regionSelector.js          # 长图纯滚动区域透明框选遮罩
 │       └── longshotHud.js             # 长图悬浮控制条（高度展示、快滚告警、完成/取消）
 └── scripts/
@@ -275,7 +278,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
         └─ `<tmp_out.png>` 不存在（用户按 Esc 取消）：
               └─ 调前端 `SetPinTemporaryHidden(id, false)` 无损恢复原贴图
 ```
-对于 `pinshot capture-edit`：直接抓屏后调起 `satty`，用户标注完成后既可直接复制/保存，也可通过配置按需转贴图。
+对于 `pinshot capture-edit`：直接抓屏后调起 `satty`，标注完成后将最终图复制到剪贴板。若开启自动保存，只导出标注后的图。
 
 ### 4.6 滚动长图引擎设计（`longshot/`）
 滚动长图完整流程分为 4 个清晰阶段：
@@ -335,6 +338,10 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 
 **扩展快捷键设置**：可在 GNOME「扩展」应用打开 Pinshot 首选项，或运行 `gnome-extensions prefs pinshot@dgxz99`。默认 `Super+Shift+P` 区域截图并贴图、`Super+Shift+V` 剪贴板贴图、`Super+Shift+U` 解除全部穿透。区域截图后标注、显示／隐藏全部贴图、恢复最近贴图默认未绑定。各项可改绑、禁用或恢复默认，不修改 GNOME 系统里的自定义绑定。贴图局部按键只有在 Shell 将键盘事件交给贴图时才生效，也可用右键菜单完成相应操作。
 
+**截图输出设置**：Pinshot 发起的截图仍使用 GNOME 原生框选、屏幕或窗口截图界面。仅在本次 Pinshot 截图期间，将 PNG 交给 Core 处理，不触发 GNOME 的自动保存和完成通知，也不修改任何 GNOME 设置。原生 `Print` 工作流照常保存和通知。
+
+扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Screenshots`），文件名默认 `pinshot-{id}.png`，已有同名文件不会被覆盖。
+
 ### 5.4 前端 4 条内存防泄漏红线
 1. **历史零像素常驻**：贴图关闭后只保留磁盘路径和元数据索引，GJS 中绝不缓存已关闭贴图的 `Cogl.Texture` / `GdkPixbuf`。
 2. **超大图/长图纹理降采样**：前端加载显示纹理前检查图片尺寸，若任一边超过 `max_texture_edge_px`（默认 `4096px`）或超过当前显示器物理分辨率的 2 倍，使用 `GdkPixbuf.Pixbuf.new_from_file_at_scale` 按上限等比降采样生成显示纹理；磁盘保留 100% 原图供复制、标注与保存。
@@ -346,7 +353,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 ## 6. 未来 Niri + DMS 前端扩展蓝图
 
 得益于核心与前端的完全解耦，未来迁移至 **Niri + DMS（DankMaterialShell）** 时：
-1. **Core 零改动复用**：`pinshot-core` 与 `pinshot-cli`（5 个主命令 + 兜底命令、Portal 抓屏与 ScreenCast、剪贴板文字转图、长图拼接、`satty` 回流、缓存双阈值清理、配置文件、二期 OCR）100% 直接沿用。
+1. **Core 零改动复用**：`pinshot-core` 与 `pinshot-cli`（5 个主命令 + 兜底命令、前端截图协议与 Portal ScreenCast、剪贴板文字转图、长图拼接、`satty` 回流、缓存双阈值清理、配置文件、二期 OCR）100% 直接沿用。
 2. **新增极薄 Niri 前端（`crates/pinshot-niri`）**：
    - 使用 `gtk4-rs` + `gtk4-layer-shell`，在 `Layer::Overlay` 创建贴图表面，天然实现「非窗口、永远置顶、不进 DMS 任务栏、跨工作区显示、精确坐标定位与点击穿透（空 input region）」。
    - 实现与 GNOME 前端完全一致的 `io.github.dgxz99.Pinshot.Frontend1` D-Bus 接口；当所有贴图关闭后进程自动退出（回到 0 MB 闲置）。
@@ -368,7 +375,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 
 ### M1：核心闭环（抓屏 + 剪贴板文字转图 + 真·非窗口贴图）
 - **交付内容**：
-  - Core：`capture.rs`（Portal 区域抓屏）、`clipboard.rs`（多图片 MIME + `text/uri-list` + 纯文本探测 + 空剪贴板通知）、`text_render.rs`（代码检测、Pango 转义、折行、超长保护、主题自适应）；
+  - Core：`capture.rs`（接收前端截图和导出 PNG）、`clipboard.rs`（多图片 MIME + `text/uri-list` + 纯文本探测 + 空剪贴板通知）、`text_render.rs`（代码检测、Pango 转义、折行、超长保护、主题自适应）；
   - GNOME 前端：`PinActor` 完整实现（无边框非窗口渲染、分数缩放 1:1 逻辑尺寸、左键拖动、滚轮缩放、`Ctrl+滚轮` 透明度、迷你缩略图、双击左键或中键关闭、右键菜单、4 条内存防泄漏红线）；
   - 支持通过命令恢复最近贴图。
 - **验收标准**：
@@ -405,7 +412,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 - **交付内容**：
   - `ocr.rs`：纯 Rust AI 视觉 API 集成（OpenAI 兼容 / Gemini / 本地 Ollama），右键菜单触发 OCR 并支持复制结果；
   - `hooks.rs`：`config.toml` 自定义外部命令钩子接入右键菜单；
-  - （切桌面时启动）`crates/pinshot-niri`：`gtk4-rs + gtk4-layer-shell` 前端与 SNI 托盘实现。
+  - （切桌面时启动）`crates/pinshot-niri`：`gtk4-rs + gtk4-layer-shell` 前端与 DMS 快捷键接入。
 
 ---
 

@@ -98,7 +98,7 @@ pub struct CacheConfig {
     pub max_size_mb: u64,
     /// 缓存最长保留天数
     pub max_age_days: u64,
-    /// 顶栏历史列表默认展示条数
+    /// 历史查询默认返回条数
     pub history_menu_limit: usize,
 }
 

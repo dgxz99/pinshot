@@ -77,7 +77,7 @@
 本系统**不引入常驻后台守护进程**：
 1. **正向调用（Core → 前端）**：用户通过快捷键执行 `pinshot <subcommand>`，Rust Core 短暂启动完成抓屏/渲染/落盘/索引更新后，通过 Session D-Bus 通知前端创建或更新贴图，随即**立即退出释放全部内存**。
 2. **反向回调（前端 → Core）**：当用户在贴图右键菜单点击「复制图片」「复制原文」「进入 `satty` 标注」「保存」等需要重 I/O 或系统交互的动作时，前端通过异步子进程调用 `pinshot internal <action> <id>`，同样干完即退。
-3. **长图录制期**：仅在用户处于滚动长图录制状态期间，`pinshot longshot` 保持运行以消费 PipeWire 视频帧并实时拼接；用户点击「完成」或「取消」后，结果落盘并推送贴图，进程立即退出归还全部帧缓冲内存。
+3. **长图录制期**：`pinshot longshot` 按需运行，消费 PipeWire 视频帧并实时拼接。完成时把结果交给缓存、贴图与剪贴板；取消时丢弃画面。随后进程退出，不持续录制。
 
 ---
 
@@ -104,6 +104,10 @@
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
 | `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 显示原生截图界面，把用户确认后的 PNG 写入调用方的临时文件 |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
+| `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
+| `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
+
+信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `finish` 或 `cancel`。前端监听该连接消失，用于收回选择器、控制条并恢复贴图。
 
 ### 3.2 Core 提供给前端的内部子命令（`pinshot internal ...`）
 前端通过短命子命令将图像处理、保存和历史写入交给 Core：
@@ -258,7 +262,7 @@ padding_px = 16
 cargo run --locked -p pinshot-cli --features longshot -- internal probe-longshot --frames 12
 ```
 
-可选的 `longshot` 构建功能需要 GStreamer Core、App 与 Video 开发库，以及运行时的 `pipewiresrc`、`videorate` 和 `videoconvert` 插件。默认安装流程不启用它。探测命令不请求持久授权，不保存帧、不改剪贴板，也不生成贴图。它报告帧数、像素尺寸，以及 Portal 提供的逻辑尺寸和位置；按 `Ctrl+C` 或取消共享可退出。结束时先停止取帧，再关闭 Portal 会话。
+`longshot` 构建功能需要 GStreamer Core、App 与 Video 开发库，以及运行时的 `pipewiresrc`、`videorate` 和 `videoconvert` 插件；`scripts/install.sh` 默认启用。探测命令不请求持久授权，不保存帧、不改剪贴板，也不生成贴图。它报告帧数、像素尺寸，以及 Portal 提供的逻辑尺寸和位置；按 `Ctrl+C` 或取消共享可退出。结束时先停止取帧，再关闭 Portal 会话。
 
 **拼接开发验证**：在同一个会话中运行以下命令，并选择包含滚动内容的显示器：
 
@@ -271,10 +275,10 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 - 终端看到「开始滚动」后再慢慢向下滚动。找不到可靠重叠时，回滚到上次匹配的位置再继续。计时结束或达到尺寸上限会写出 PNG，已有文件不覆盖；按 `Ctrl+C` 或停止共享会丢弃本次结果。
 - 拼接先在已拼接尾部搜索最匹配的位置，再用 RGB 采样复核。静止、已包含的回滚和位置不明确的帧不追加；只有确认重叠才追加底部新行。默认画布上限为 24,000 像素高和 192 MiB RGBA，以先到者为准。
 
-**完整桌面流程规划**：
-1. 通过 GNOME 扩展框选单个显示器内的滚动内容，并在录制时临时隐藏已有贴图。
-2. 通过悬浮控制条显示当前高度和重叠告警，支持主动完成或取消；控制条应放在选区之外。
-3. 结束时先停止取帧并关闭共享会话，再恢复旧贴图。确认完成时复用 Pinshot 的缓存、剪贴板和贴图流程。
+**桌面流程（`pinshot longshot`）**：
+1. 先通过 GNOME Portal 授权一块显示器；根据 Portal 返回的逻辑矩形定位显示器，在该屏幕内框选正文。框选时短时抓取输入，完成后立即释放；框选和录制期间隐藏既有贴图。
+2. 选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
+3. 先停止取帧与 Portal 会话，再结束持有 UI 的 D-Bus 连接，由扩展恢复旧贴图。确认完成后复用 Pinshot 的缓存、剪贴板、贴图和截图导出设置。
 
 ---
 
@@ -375,7 +379,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 ### M3：滚动长图（`pinshot longshot`）
 - **交付内容**：
   - `longshot/mod.rs`（Portal ScreenCast 授权与会话清理已接入，`restore_token` 复用待接入）；
-  - 前端 `regionSelector.js`（透明框选纯滚动内容区）与 `longshotHud.js`（悬浮控制条：实时高度、快滚告警、完成/取消）；
+  - 前端 `longshot.js` 负责透明框选、非模态控制条及录制结束后的清理；
   - GStreamer 采帧和单屏逻辑选区裁剪、纯 Rust 重叠拼接已接入；可通过定时录制入口验证 PNG 输出；
   - 录前自动隐藏旧贴图、录完自动恢复、自动复制剪贴板并按适配高度贴图。
 - **验收标准**：

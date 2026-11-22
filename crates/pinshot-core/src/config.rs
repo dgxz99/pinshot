@@ -5,16 +5,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{PinshotError, Result};
 
+const DEFAULT_SAVE_DIR: &str = "~/Pictures/Pinshots";
+
 /// 默认生成的配置文件模板（包含中文注释，便于用户手工调整）
 const DEFAULT_CONFIG_TEMPLATE: &str = r#"[general]
-save_dir = "~/Pictures/Screenshots"
+save_dir = "~/Pictures/Pinshots"
 restore_on_startup = false
 notify_on_save = true
 
 [cache]
 max_size_mb = 200
 max_age_days = 14
-history_menu_limit = 15
 
 [pin]
 default_opacity = 1.0
@@ -26,7 +27,6 @@ mini_size_px = 64
 min_visible_edge_px = 32
 max_texture_edge_px = 4096
 hide_on_fullscreen = true
-follow_all_workspaces = true
 
 [text_card]
 theme = "auto"
@@ -35,24 +35,6 @@ max_lines = 80
 prose_font = "Sans 12"
 code_font = "Monospace 11"
 padding_px = 16
-
-[longshot]
-max_height_px = 24000
-auto_copy = true
-auto_pin = true
-persist_screencast = true
-
-[ocr]
-provider = "openai_compatible"
-endpoint = ""
-model = ""
-api_key_env = "PINSHOT_OCR_API_KEY"
-prompt = "请准确提取图片中的全部文字，保留原有换行与表格结构，只输出识别结果。"
-
-# [[hooks]]
-# name = "翻译文本"
-# command = ["my-translate-script", "{image_path}"]
-# copy_stdout = true
 "#;
 
 /// 应用总配置（对应 `~/.config/pinshot/config.toml`）
@@ -63,9 +45,6 @@ pub struct Config {
     pub cache: CacheConfig,
     pub pin: PinConfig,
     pub text_card: TextCardConfig,
-    pub longshot: LongshotConfig,
-    pub ocr: OcrConfig,
-    pub hooks: Vec<HookConfig>,
 }
 
 /// 通用行为配置
@@ -83,7 +62,7 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            save_dir: "~/Pictures/Screenshots".to_string(),
+            save_dir: DEFAULT_SAVE_DIR.to_string(),
             restore_on_startup: false,
             notify_on_save: true,
         }
@@ -98,8 +77,6 @@ pub struct CacheConfig {
     pub max_size_mb: u64,
     /// 缓存最长保留天数
     pub max_age_days: u64,
-    /// 历史查询默认返回条数
-    pub history_menu_limit: usize,
 }
 
 impl Default for CacheConfig {
@@ -107,7 +84,6 @@ impl Default for CacheConfig {
         Self {
             max_size_mb: 200,
             max_age_days: 14,
-            history_menu_limit: 15,
         }
     }
 }
@@ -129,8 +105,6 @@ pub struct PinConfig {
     pub max_texture_edge_px: u32,
     /// 全屏应用出现时是否自动隐藏该显示器贴图
     pub hide_on_fullscreen: bool,
-    /// 是否跨所有工作区保持显示
-    pub follow_all_workspaces: bool,
 }
 
 impl Default for PinConfig {
@@ -145,7 +119,6 @@ impl Default for PinConfig {
             min_visible_edge_px: 32,
             max_texture_edge_px: 4096,
             hide_on_fullscreen: true,
-            follow_all_workspaces: true,
         }
     }
 }
@@ -186,62 +159,6 @@ impl Default for TextCardConfig {
     }
 }
 
-/// 滚动长图引擎配置
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LongshotConfig {
-    /// 防止极端长图无限膨胀的像素高度上限
-    pub max_height_px: u32,
-    pub auto_copy: bool,
-    pub auto_pin: bool,
-    /// 是否持久化并复用 Portal ScreenCast restore_token
-    pub persist_screencast: bool,
-}
-
-impl Default for LongshotConfig {
-    fn default() -> Self {
-        Self {
-            max_height_px: 24000,
-            auto_copy: true,
-            auto_pin: true,
-            persist_screencast: true,
-        }
-    }
-}
-
-/// 二期 AI 视觉 OCR 配置
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct OcrConfig {
-    pub provider: String,
-    pub endpoint: String,
-    pub model: String,
-    pub api_key_env: String,
-    pub prompt: String,
-}
-
-impl Default for OcrConfig {
-    fn default() -> Self {
-        Self {
-            provider: "openai_compatible".to_string(),
-            endpoint: String::new(),
-            model: String::new(),
-            api_key_env: "PINSHOT_OCR_API_KEY".to_string(),
-            prompt: "请准确提取图片中的全部文字，保留原有换行与表格结构，只输出识别结果。"
-                .to_string(),
-        }
-    }
-}
-
-/// 自定义右键外部命令钩子配置
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct HookConfig {
-    pub name: String,
-    pub command: Vec<String>,
-    #[serde(default)]
-    pub copy_stdout: bool,
-}
-
 impl Config {
     /// 返回默认配置文件路径：`~/.config/pinshot/config.toml`
     pub fn default_config_path() -> Result<PathBuf> {
@@ -278,7 +195,13 @@ impl Config {
 
     /// 展开 `general.save_dir` 中的 `~` 前缀，返回实际保存目录路径
     pub fn resolved_save_dir(&self) -> Result<PathBuf> {
-        expand_tilde(&self.general.save_dir)
+        let configured = self.general.save_dir.trim();
+        let directory = match configured {
+            // 旧版自动生成的默认目录跟随新默认值，不改写用户文件
+            "" | "~/Pictures/Screenshots" | "~/Pictures/Screenshots/" => DEFAULT_SAVE_DIR,
+            _ => configured,
+        };
+        expand_tilde(directory)
     }
 
     /// 规范化配置边界值，防止非法参数导致运行时除零或异常
@@ -302,17 +225,11 @@ impl Config {
         if self.pin.max_texture_edge_px < 512 {
             self.pin.max_texture_edge_px = 512;
         }
-        if self.cache.history_menu_limit == 0 {
-            self.cache.history_menu_limit = 1;
-        }
         if self.text_card.max_width_px < 160 {
             self.text_card.max_width_px = 160;
         }
         if self.text_card.max_lines == 0 {
             self.text_card.max_lines = 1;
-        }
-        if self.longshot.max_height_px < 1000 {
-            self.longshot.max_height_px = 1000;
         }
     }
 }
@@ -358,11 +275,6 @@ max_size_mb = 512
 
 [text_card]
 theme = "dark"
-
-[[hooks]]
-name = "翻译"
-command = ["echo", "{image_path}"]
-copy_stdout = true
 "#,
         )
         .expect("写入配置失败");
@@ -372,9 +284,6 @@ copy_stdout = true
         assert_eq!(cfg.cache.max_age_days, 14);
         assert_eq!(cfg.text_card.theme, TextCardTheme::Dark);
         assert_eq!(cfg.pin.mini_size_px, 64);
-        assert_eq!(cfg.hooks.len(), 1);
-        assert_eq!(cfg.hooks[0].name, "翻译");
-        assert!(cfg.hooks[0].copy_stdout);
     }
 
     #[test]
@@ -409,9 +318,25 @@ max_scale = 0.5
     }
 
     #[test]
+    fn old_default_save_dir_uses_pinshots_without_changing_custom_paths() {
+        let mut cfg = Config::default();
+        let default = cfg.resolved_save_dir().unwrap();
+        assert!(default.ends_with("Pictures/Pinshots"));
+        for value in ["~/Pictures/Screenshots", "~/Pictures/Screenshots/", ""] {
+            cfg.general.save_dir = value.to_string();
+            assert_eq!(cfg.resolved_save_dir().unwrap(), default);
+        }
+        cfg.general.save_dir = "/tmp/Custom Screenshots".to_string();
+        assert_eq!(
+            cfg.resolved_save_dir().unwrap(),
+            PathBuf::from("/tmp/Custom Screenshots")
+        );
+    }
+
+    #[test]
     fn expand_tilde_resolves_home_prefix() {
-        let expanded = expand_tilde("~/Pictures/Screenshots").expect("展开波浪号失败");
-        assert!(expanded.ends_with("Pictures/Screenshots"));
+        let expanded = expand_tilde(DEFAULT_SAVE_DIR).expect("展开波浪号失败");
+        assert!(expanded.ends_with("Pictures/Pinshots"));
         assert!(!expanded.to_string_lossy().starts_with('~'));
 
         let abs = expand_tilde("/tmp/pinshot-save").expect("绝对路径解析失败");

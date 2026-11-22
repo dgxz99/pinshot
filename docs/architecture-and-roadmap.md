@@ -76,7 +76,7 @@
 ### 2.2 零常驻执行模型
 本系统**不引入常驻后台守护进程**：
 1. **正向调用（Core → 前端）**：用户通过快捷键执行 `pinshot <subcommand>`，Rust Core 短暂启动完成抓屏/渲染/落盘/索引更新后，通过 Session D-Bus 通知前端创建或更新贴图，随即**立即退出释放全部内存**。
-2. **反向回调（前端 → Core）**：当用户在贴图右键菜单点击「复制图片」「复制原文」「进入 `satty` 标注」「保存」「OCR」「删除历史」等需要重 I/O 或系统交互的动作时，前端通过异步子进程调用 `pinshot internal <action> <id>`，同样干完即退。
+2. **反向回调（前端 → Core）**：当用户在贴图右键菜单点击「复制图片」「复制原文」「进入 `satty` 标注」「保存」等需要重 I/O 或系统交互的动作时，前端通过异步子进程调用 `pinshot internal <action> <id>`，同样干完即退。
 3. **长图录制期**：仅在用户处于滚动长图录制状态期间，`pinshot longshot` 保持运行以消费 PipeWire 视频帧并实时拼接；用户点击「完成」或「取消」后，结果落盘并推送贴图，进程立即退出归还全部帧缓冲内存。
 
 ---
@@ -94,7 +94,7 @@
 | 方法 | 参数 | 返回值 | 说明 |
 |---|---|---|---|
 | `Ping()` | 无 | `s`（前端标识，如 `"gnome-shell-51"`） | 探测前端在线与版本 |
-| `CreatePin(payload_json)` | `s`（JSON：`id`, `image_path`, `thumb_path`, `width`, `height`, `source_scale`, `kind`, `has_text`, `title_preview`, `initial_pos?`） | `b` | 创建并弹出贴图；`source_scale` 用于分数缩放 1:1 逻辑尺寸还原 |
+| `CreatePin(payload_json)` | `s`（JSON：`id`, `image_path`, `thumb_path`, `width`, `height`, `source_scale`, `kind`, `has_text`, `title_preview`） | `b` | 创建并弹出贴图；`source_scale` 用于分数缩放 1:1 逻辑尺寸还原 |
 | `UpdatePin(id, payload_json)` | `s`, `s` | `b` | 标注回流等场景原地替换贴图内容并恢复显示 |
 | `SetPinTemporaryHidden(id, hidden)` | `s`, `b` | `b` | 进入 `satty` 标注时临时隐藏原贴图，取消时无损恢复 |
 | `ClosePin(id)` | `s` | `b` | 关闭指定贴图并释放纹理 |
@@ -104,24 +104,16 @@
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
 | `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 显示原生截图界面，把用户确认后的 PNG 写入调用方的临时文件 |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
-| `SelectRegion()` | 无 | `s`（JSON：`cancelled`, `monitor_index`, `x`, `y`, `width`, `height`, `scale`） | 长图前由前端提供全屏透明遮罩框选纯滚动内容区域 |
-| `UpdateLongshotHud(state_json)` | `s`（JSON：`active`, `stitched_height`, `warning`, `rect`） | `b` | 更新长图悬浮控制条状态（高度、滚动过快告警） |
 
-### 3.2 前端发出的 D-Bus 信号（用于长图会话交互）
-- `LongshotAction(action: s)`：用户在长图悬浮控制条点击按钮或按快捷键时发出 `"finish"` / `"cancel"`，通知正在运行的 `pinshot longshot` 进程收尾。
-
-### 3.3 Core 提供给前端的内部子命令（`pinshot internal ...`）
-前端仅负责展示与事件派发，所有副作用操作通过短命子命令交给 Core：
+### 3.2 Core 提供给前端的内部子命令（`pinshot internal ...`）
+前端通过短命子命令将图像处理、保存和历史写入交给 Core：
 - `pinshot internal copy-image <id>`
 - `pinshot internal copy-text <id>`
 - `pinshot internal save-image <id>`
 - `pinshot internal edit-satty <id>`
 - `pinshot internal mark-closed <id>`（更新历史索引为已关闭，供 `restore-last` 捞回）
-- `pinshot internal delete-history <id>`（物理删除图片与索引）
-- `pinshot internal list-history [limit]`（返回最近历史 JSON）
-- `pinshot internal restore-pin <id>`
-- `pinshot internal run-hook <hook_name> <id>`
-- `pinshot internal run-ocr <id>`（二期）
+- `pinshot internal get-pin-config`
+- `pinshot internal restore-startup`
 
 ---
 
@@ -179,14 +171,13 @@ pinshot/
 
 ```toml
 [general]
-save_dir = "~/Pictures/Screenshots"
+save_dir = "~/Pictures/Pinshots"
 restore_on_startup = false
 notify_on_save = true
 
 [cache]
 max_size_mb = 200          # 缓存目录最大磁盘占用（MB）
 max_age_days = 14          # 缓存最长保留天数
-history_menu_limit = 15    # 历史查询默认返回条数
 
 [pin]
 default_opacity = 1.0
@@ -198,7 +189,6 @@ mini_size_px = 64          # 迷你缩略图边长（逻辑像素）
 min_visible_edge_px = 32   # 拖拽防丢至少留在屏内的像素
 max_texture_edge_px = 4096 # 前端渲染最大纹理边长上限
 hide_on_fullscreen = true
-follow_all_workspaces = true
 
 [text_card]
 theme = "auto"             # "auto" | "dark" | "light"
@@ -208,29 +198,11 @@ prose_font = "Sans 12"
 code_font = "Monospace 11"
 padding_px = 16
 
-[longshot]
-max_height_px = 24000      # 防止极端长图无限膨胀
-auto_copy = true
-auto_pin = true
-persist_screencast = true  # 尝试复用 Portal restore_token
-
-[ocr]
-# 二期 AI 视觉 OCR 配置预留
-provider = "openai_compatible"
-endpoint = ""
-model = ""
-api_key_env = "PINSHOT_OCR_API_KEY"
-prompt = "请准确提取图片中的全部文字，保留原有换行与表格结构，只输出识别结果。"
-
-# [[hooks]]
-# name = "翻译文本"
-# command = ["my-translate-script", "{image_path}"]
-# copy_stdout = true
 ```
 
 ### 4.3 持久化存储、滚动清理与隐私保护（`store.rs`）
 - **目录与权限**：`~/.cache/pinshot/` 创建时严格设置 Unix 权限 `0700`（仅当前用户可读写）。
-  - `images/<id>.png`：100% 原始无损图片（供复制、保存、`satty` 标注、OCR 使用）。
+  - `images/<id>.png`：100% 原始无损图片（供复制、保存和 `satty` 标注使用）。
   - `thumbs/<id>.png`：前端迷你态用的轻量缩略图（如 128px 以内，几 KB）。
   - `texts/<id>.txt`：剪贴板文字转图片时同步保存的原始纯文本。
   - `index.json`：所有贴图与历史条目的元数据（原子写入：先写 `.tmp` 再 `rename`）。
@@ -241,9 +213,8 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
   1. 保护当前处于 `active` 状态的贴图不被淘汰；
   2. 先清理 `now - last_used_at > max_age_days` 的非活跃历史条目；
   3. 再统计剩余目录总字节数，若超过 `max_size_mb`，按 `last_used_at` 从旧到新依次删除对应图片、缩略图、文本及索引项，直至低于阈值；
-  4. 用户主动保存到 `~/Pictures/Screenshots/` 的文件独立存在，永不参与清理。
+  4. 用户主动保存到 `~/Pictures/Pinshots/` 的文件独立存在，永不参与清理。
 - **隐私清理**：
-  - 支持对单条历史执行 `delete-history <id>`，立即物理删除图片、缩略图、文本及索引；
   - 支持 `pinshot clear-history` 一键清空所有非活跃历史（加 `--all` 时连同活跃贴图一起关闭并清空）。
 - **重启后恢复行为**：
   - 默认 `restore_on_startup = false`：重新登录后不自动弹满屏，上次关机前未关闭的贴图自动排在历史记录最顶部，运行 `pinshot restore-last` 或绑定对应快捷键即可恢复；
@@ -280,7 +251,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 ```
 对于 `pinshot capture-edit`：直接抓屏后调起 `satty`，标注完成后将最终图复制到剪贴板。若开启自动保存，只导出标注后的图。
 
-### 4.6 滚动长图引擎设计（`longshot/`）
+### 4.6 滚动长图引擎规划（`longshot/`）
 滚动长图完整流程分为 4 个清晰阶段：
 1. **启动与避让**：
    - 调用前端 `SetSystemHidden(true)` 临时隐藏屏幕上已有贴图，避免遮挡滚动内容；
@@ -329,7 +300,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 | 调节不透明度 | `Ctrl + 滚轮` | 免焦点 |
 | 迷你缩略图切换 | 右键菜单收起或展开（收缩至 `64×64px` 缩略图并记忆原位原尺寸） | 仅菜单展开期间捕获点击 |
 | 快速关闭 | 双击左键或点击鼠标中键 | 免焦点 |
-| 右键菜单 | 右键点击（复制图片 / 复制原文 / `satty` 标注 / 迷你态 / 点击穿透 / 恢复 100% / OCR / 钩子 / 保存 / 关闭） | 仅菜单展开期间捕获点击 |
+| 右键菜单 | 右键点击（复制图片 / 复制原文 / `satty` 标注 / 迷你态 / 点击穿透 / 恢复 100% / 保存 / 关闭） | 仅菜单展开期间捕获点击 |
 | 键盘快捷键 | **单击贴图选中**（显示 1px 主题色高亮描边）后支持：`Ctrl+C` 复制、`E` 标注、`Shift+R` 收起／展开迷你态、`T` 开启穿透、`0` 复原 100%、`Esc` 关闭 | 点贴图外任意位置立即取消选中并归还焦点 |
 
 **点击穿透（Ghost Mode）**：
@@ -340,7 +311,7 @@ prompt = "请准确提取图片中的全部文字，保留原有换行与表格�
 
 **截图输出设置**：Pinshot 发起的截图仍使用 GNOME 原生框选、屏幕或窗口截图界面。仅在本次 Pinshot 截图期间，将 PNG 交给 Core 处理，不触发 GNOME 的自动保存和完成通知，也不修改任何 GNOME 设置。原生 `Print` 工作流照常保存和通知。
 
-扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Screenshots`），文件名默认为 `pinshot-YYYYMMDD-HHMMSS.png`，以实际保存时的本地时间命名；同一秒重名则追加数字序号，不覆盖旧图。
+扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Pinshots`），文件名默认为 `pinshot-YYYYMMDD-HHMMSS.png`，以实际保存时的本地时间命名；同一秒重名则追加数字序号，不覆盖旧图。
 
 ### 5.4 前端 4 条内存防泄漏红线
 1. **历史零像素常驻**：贴图关闭后只保留磁盘路径和元数据索引，GJS 中绝不缓存已关闭贴图的 `Cogl.Texture` / `GdkPixbuf`。

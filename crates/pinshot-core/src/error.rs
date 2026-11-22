@@ -38,10 +38,6 @@ pub enum PinshotError {
     /// 无法解析 XDG / HOME 目录
     #[error("无法定位用户目录: {0}")]
     HomeDir(String),
-
-    /// 功能尚未实现
-    #[error("功能尚未实现: {0}")]
-    Unimplemented(&'static str),
 }
 
 /// Pinshot 核心统一结果类型

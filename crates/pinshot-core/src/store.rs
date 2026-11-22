@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::CacheConfig;
 use crate::error::{PinshotError, Result};
-use crate::protocol::{HistoryItemSummary, PinKind, PinPayload, Point};
+use crate::protocol::{PinKind, PinPayload};
 
 /// 缩略图最大边长（像素）
 const THUMB_MAX_EDGE: u32 = 128;
@@ -49,7 +49,7 @@ pub struct PinRecord {
 
 impl PinRecord {
     /// 转换为发送给前端的 D-Bus `PinPayload`
-    pub fn to_payload(&self, initial_pos: Option<Point>) -> PinPayload {
+    pub fn to_payload(&self) -> PinPayload {
         PinPayload {
             id: self.id.clone(),
             image_path: self.image_path.to_string_lossy().into_owned(),
@@ -60,24 +60,6 @@ impl PinRecord {
             kind: self.kind,
             has_text: self.text_path.is_some(),
             title_preview: self.title_preview.clone(),
-            initial_pos,
-        }
-    }
-
-    /// 转换为返回给顶栏历史列表的轻量摘要
-    pub fn to_summary(&self) -> HistoryItemSummary {
-        HistoryItemSummary {
-            id: self.id.clone(),
-            kind: self.kind,
-            created_at: self.created_at,
-            last_used_at: self.last_used_at,
-            active: self.active,
-            thumb_path: self.thumb_path.to_string_lossy().into_owned(),
-            has_text: self.text_path.is_some(),
-            title_preview: self.title_preview.clone(),
-            width: self.width,
-            height: self.height,
-            size_bytes: self.size_bytes,
         }
     }
 }
@@ -90,13 +72,6 @@ pub struct NewEntryRequest<'a> {
     pub title_preview: String,
     pub source_scale: f64,
     pub active: bool,
-}
-
-/// 缓存清理统计结果
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PruneStats {
-    pub removed_count: usize,
-    pub freed_bytes: u64,
 }
 
 /// 持久化缓存管理器（对应 `~/.cache/pinshot/`）
@@ -140,7 +115,7 @@ impl PinStore {
         self.root_dir.join("index.json")
     }
 
-    pub fn screencast_token_path(&self) -> PathBuf {
+    fn screencast_token_path(&self) -> PathBuf {
         self.root_dir.join("screencast_token")
     }
 
@@ -365,55 +340,28 @@ impl PinStore {
         Ok(items)
     }
 
-    /// 按最近使用时间倒序列出历史条目（优先过滤磁盘文件已丢失的无效项）
-    pub fn list_history(&self, limit: usize) -> Result<Vec<PinRecord>> {
-        let index = self.load_index()?;
-        let mut items: Vec<PinRecord> = index
+    /// 统计原图仍存在的历史条目，不为状态命令排序或收集记录
+    pub fn history_count(&self) -> Result<usize> {
+        Ok(self
+            .load_index()?
             .entries
-            .into_iter()
+            .iter()
             .filter(|entry| entry.image_path.exists())
-            .collect();
-        items.sort_by(|a, b| {
-            b.last_used_at
-                .cmp(&a.last_used_at)
-                .then_with(|| b.created_at.cmp(&a.created_at))
-        });
-        items.truncate(limit);
-        Ok(items)
+            .count())
     }
 
-    /// 查找最近一条可恢复的记录（排除前端当前正在显示的活跃贴图 ID 集合）
-    pub fn latest_restorable(&self, currently_visible_ids: &HashSet<String>) -> Result<Option<PinRecord>> {
-        let index = self.load_index()?;
-        let mut candidates: Vec<PinRecord> = index
+    /// 查找最近一条可恢复的记录，优先上次会话遗留的活跃贴图
+    pub fn latest_restorable(
+        &self,
+        currently_visible_ids: &HashSet<String>,
+    ) -> Result<Option<PinRecord>> {
+        Ok(self
+            .load_index()?
             .entries
             .into_iter()
-            .filter(|entry| {
-                !currently_visible_ids.contains(&entry.id) && entry.image_path.exists()
-            })
-            .collect();
-
-        // 重启后遗留 active=true 的历史记录排在最前，其次按 last_used_at 倒序
-        candidates.sort_by(|a, b| {
-            b.active
-                .cmp(&a.active)
-                .then_with(|| b.last_used_at.cmp(&a.last_used_at))
-                .then_with(|| b.created_at.cmp(&a.created_at))
-        });
-
-        Ok(candidates.into_iter().next())
-    }
-
-    /// 彻底物理删除单条历史的图片、缩略图、文本与索引
-    pub fn delete_entry(&self, id: &str) -> Result<bool> {
-        let mut index = self.load_index()?;
-        let Some(pos) = index.entries.iter().position(|entry| entry.id == id) else {
-            return Ok(false);
-        };
-        let removed = index.entries.remove(pos);
-        remove_record_files(&removed);
-        self.save_index(&index)?;
-        Ok(true)
+            .rev()
+            .filter(|entry| !currently_visible_ids.contains(&entry.id) && entry.image_path.exists())
+            .max_by_key(|entry| (entry.active, entry.last_used_at, entry.created_at)))
     }
 
     /// 清空历史缓存：默认仅清非活跃条目；`include_active = true` 时全部清空并返回被删活跃 ID
@@ -440,19 +388,14 @@ impl PinStore {
         Ok((removed_count, removed_active_ids))
     }
 
-    /// 显式执行双阈值清理（支持指定时间戳与字节/秒阈值，便于单测与运维调用）
-    pub fn enforce_retention_at(
-        &self,
-        now: u64,
-        max_bytes: u64,
-        max_age_secs: u64,
-    ) -> Result<PruneStats> {
+    #[cfg(test)]
+    fn enforce_retention_at(&self, now: u64, max_bytes: u64, max_age_secs: u64) -> Result<usize> {
         let mut index = self.load_index()?;
-        let stats = prune_index_entries(&mut index.entries, now, max_bytes, max_age_secs);
-        if stats.removed_count > 0 {
+        let removed_count = prune_index_entries(&mut index.entries, now, max_bytes, max_age_secs);
+        if removed_count > 0 {
             self.save_index(&index)?;
         }
-        Ok(stats)
+        Ok(removed_count)
     }
 
     /// 读取持久化的 ScreenCast restore_token
@@ -514,9 +457,7 @@ impl PinStore {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let tmp_path = self
-            .root_dir
-            .join(format!(".index.json.tmp.{pid}.{nanos}"));
+        let tmp_path = self.root_dir.join(format!(".index.json.tmp.{pid}.{nanos}"));
 
         let serialized = serde_json::to_vec_pretty(index)?;
         {
@@ -539,8 +480,8 @@ fn prune_index_entries(
     now: u64,
     max_bytes: u64,
     max_age_secs: u64,
-) -> PruneStats {
-    let mut stats = PruneStats::default();
+) -> usize {
+    let mut removed_count = 0;
 
     // 1. 先淘汰超过保留天数的非活跃条目
     let mut remaining = Vec::with_capacity(entries.len());
@@ -548,8 +489,7 @@ fn prune_index_entries(
         let expired = !entry.active && now.saturating_sub(entry.last_used_at) > max_age_secs;
         if expired {
             remove_record_files(&entry);
-            stats.removed_count += 1;
-            stats.freed_bytes = stats.freed_bytes.saturating_add(entry.size_bytes);
+            removed_count += 1;
         } else {
             remaining.push(entry);
         }
@@ -565,9 +505,8 @@ fn prune_index_entries(
             .map(|(idx, _)| idx)
             .collect();
 
-        evictable_indices.sort_by_key(|&idx| {
-            (remaining[idx].last_used_at, remaining[idx].created_at)
-        });
+        evictable_indices
+            .sort_by_key(|&idx| (remaining[idx].last_used_at, remaining[idx].created_at));
 
         let mut to_remove = HashSet::new();
         for idx in evictable_indices {
@@ -577,8 +516,7 @@ fn prune_index_entries(
             let entry = &remaining[idx];
             remove_record_files(entry);
             total_bytes = total_bytes.saturating_sub(entry.size_bytes);
-            stats.removed_count += 1;
-            stats.freed_bytes = stats.freed_bytes.saturating_add(entry.size_bytes);
+            removed_count += 1;
             to_remove.insert(idx);
         }
 
@@ -594,7 +532,7 @@ fn prune_index_entries(
     }
 
     *entries = remaining;
-    stats
+    removed_count
 }
 
 /// 删除单条记录关联的磁盘文件（忽略已不存在的文件）
@@ -640,7 +578,7 @@ fn set_unix_mode(path: &Path, mode: u32) -> Result<()> {
     Ok(())
 }
 
-pub fn unix_now_secs() -> u64 {
+fn unix_now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -742,7 +680,6 @@ mod tests {
         let large_cfg = CacheConfig {
             max_size_mb: 200,
             max_age_days: 14,
-            history_menu_limit: 15,
         };
 
         let png = make_test_png(64, 64, 1);
@@ -795,14 +732,17 @@ mod tests {
             .expect("写入失败");
 
         // 第 15 天触发清理：base_t 距今 15 天 > 14 天
-        let stats = store
+        let removed = store
             .enforce_retention_at(base_t + 15 * day, 200 * 1024 * 1024, 14 * day)
             .expect("清理失败");
 
-        assert_eq!(stats.removed_count, 1);
+        assert_eq!(removed, 1);
         assert!(store.get(&expired_inactive.id).unwrap().is_none());
         assert!(!expired_inactive.image_path.exists());
-        assert!(store.get(&expired_active.id).unwrap().is_some(), "活跃贴图必须被豁免");
+        assert!(
+            store.get(&expired_active.id).unwrap().is_some(),
+            "活跃贴图必须被豁免"
+        );
         assert!(store.get(&fresh_inactive.id).unwrap().is_some());
     }
 
@@ -813,7 +753,6 @@ mod tests {
         let cfg = CacheConfig {
             max_size_mb: 200,
             max_age_days: 14,
-            history_menu_limit: 15,
         };
 
         let png_a = make_test_png(120, 120, 10);
@@ -868,11 +807,11 @@ mod tests {
 
         // 限制容量仅够容纳 active_large + newer_inactive，放不下 oldest_inactive
         let budget = active_large.size_bytes + newer_inactive.size_bytes;
-        let stats = store
+        let removed = store
             .enforce_retention_at(t0 + 30, budget, 14 * 86_400)
             .expect("按容量清理失败");
 
-        assert_eq!(stats.removed_count, 1);
+        assert_eq!(removed, 1);
         assert!(store.get(&oldest_inactive.id).unwrap().is_none());
         assert!(!oldest_inactive.image_path.exists());
         assert!(store.get(&newer_inactive.id).unwrap().is_some());
@@ -914,16 +853,12 @@ mod tests {
             )
             .unwrap();
 
-        // 单条物理删除
-        assert!(store.delete_entry(&a.id).unwrap());
+        let (removed, active_ids) = store.clear_history(false).unwrap();
+        assert_eq!(removed, 1);
+        assert!(active_ids.is_empty());
         assert!(!a.image_path.exists());
         assert!(!a.thumb_path.exists());
         assert!(!a.text_path.as_ref().unwrap().exists());
-
-        // 清空非活跃历史不删活跃项
-        let (removed, active_ids) = store.clear_history(false).unwrap();
-        assert_eq!(removed, 0);
-        assert!(active_ids.is_empty());
         assert!(store.get(&b.id).unwrap().is_some());
 
         // clear_history(true) 连同活跃项一并物理删除并返回活跃 ID
@@ -964,9 +899,13 @@ mod tests {
         assert_eq!((updated.width, updated.height), (120, 90));
         assert!(updated.active);
 
-        let history = store.list_history(10).unwrap();
-        assert_eq!(history.len(), 2, "应保留标注前版本作为非活跃历史");
-        let backup = history.iter().find(|e| e.id != orig.id).unwrap();
+        assert_eq!(
+            store.history_count().unwrap(),
+            2,
+            "应保留标注前版本作为非活跃历史"
+        );
+        let visible = HashSet::from([orig.id]);
+        let backup = store.latest_restorable(&visible).unwrap().unwrap();
         assert!(!backup.active);
         assert_eq!((backup.width, backup.height), (100, 80));
         assert!(backup.image_path.exists());

@@ -10,7 +10,7 @@ Gio._promisify(
 /**
  * 解析 pinshot CLI 可执行文件路径（优先 ~/.local/bin/pinshot，其次依赖 PATH）
  */
-export function resolvePinshotBinary() {
+function resolvePinshotBinary() {
     const localBin = GLib.build_filenamev([GLib.get_home_dir(), '.local', 'bin', 'pinshot']);
     if (GLib.file_test(localBin, GLib.FileTest.IS_EXECUTABLE)) {
         return localBin;

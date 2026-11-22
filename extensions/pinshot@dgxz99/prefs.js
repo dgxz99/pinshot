@@ -106,7 +106,7 @@ export default class PinshotPreferences extends ExtensionPreferences {
             description: '目录可用绝对路径或 ~/，留空沿用 Pinshot 的配置。文件名自动加上本地保存时间，例如 pinshot-20261121-214530.png；同一秒重名时再加序号。',
         });
         for (const [key, title] of [
-            ['screenshot-save-dir', '保存目录（默认 ~/Pictures/Screenshots）'],
+            ['screenshot-save-dir', '保存目录（默认 ~/Pictures/Pinshots）'],
             ['screenshot-filename', '文件名前缀（默认 pinshot）'],
         ]) {
             const row = new Adw.EntryRow({title, show_apply_button: true, text: settings.get_string(key)});

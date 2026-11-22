@@ -6,10 +6,7 @@ use zbus::zvariant::Fd;
 
 use crate::capture::ScreenshotSettings;
 use crate::error::{PinshotError, Result};
-use crate::protocol::{
-    ActivePinInfo, FRONTEND_BUS_NAME, FRONTEND_INTERFACE_NAME, FRONTEND_OBJECT_PATH,
-    LongshotHudState, PinPayload, RegionSelection,
-};
+use crate::protocol::{ActivePinInfo, FRONTEND_BUS_NAME, PinPayload};
 
 #[zbus::proxy(
     interface = "io.github.dgxz99.Pinshot.Frontend1",
@@ -30,8 +27,6 @@ trait Frontend1 {
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
     fn get_screenshot_settings(&self) -> zbus::Result<(bool, String, String, bool)>;
-    fn select_region(&self) -> zbus::Result<String>;
-    fn update_longshot_hud(&self, state_json: &str) -> zbus::Result<bool>;
 }
 
 /// 统一前端 D-Bus 客户端（通过 Session Bus 调用 `Frontend1` 接口）
@@ -43,15 +38,7 @@ impl FrontendClient {
     /// 连接到当前用户 Session Bus 并创建前端代理
     pub fn connect() -> Result<Self> {
         let connection = Connection::session().map_err(map_zbus_err)?;
-        let proxy = Frontend1Proxy::builder(&connection)
-            .destination(FRONTEND_BUS_NAME)
-            .map_err(map_zbus_err)?
-            .path(FRONTEND_OBJECT_PATH)
-            .map_err(map_zbus_err)?
-            .interface(FRONTEND_INTERFACE_NAME)
-            .map_err(map_zbus_err)?
-            .build()
-            .map_err(map_zbus_err)?;
+        let proxy = Frontend1Proxy::new(&connection).map_err(map_zbus_err)?;
 
         Ok(Self { proxy })
     }
@@ -124,19 +111,6 @@ impl FrontendClient {
             filename_prefix,
             notify,
         })
-    }
-
-    /// 唤起前端全屏透明框选遮罩，返回用户选中的滚动内容矩形
-    pub fn select_region(&self) -> Result<RegionSelection> {
-        let raw = self.proxy.select_region().map_err(map_zbus_err)?;
-        let region: RegionSelection = serde_json::from_str(&raw)?;
-        Ok(region)
-    }
-
-    /// 更新长图悬浮控制条状态
-    pub fn update_longshot_hud(&self, state: &LongshotHudState) -> Result<bool> {
-        let json = serde_json::to_string(state)?;
-        self.proxy.update_longshot_hud(&json).map_err(map_zbus_err)
     }
 }
 

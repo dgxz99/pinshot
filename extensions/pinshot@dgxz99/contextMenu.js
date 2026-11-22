@@ -8,9 +8,9 @@ import {firePinshot} from './coreRunner.js';
  * 单张贴图右键上下文菜单（挂入 uiGroup，关闭后立即释放锚点）
  */
 export class PinContextMenu {
-    constructor(pinActor, callbacks) {
+    constructor(pinActor, requestClose) {
         this._pin = pinActor;
-        this._callbacks = callbacks;
+        this._requestClose = requestClose;
         this._anchor = null;
         this._menu = null;
         this._menuManager = null;
@@ -92,9 +92,7 @@ export class PinContextMenu {
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._menu.addAction('关闭贴图', () => {
-            if (this._callbacks?.onRequestClose) {
-                this._callbacks.onRequestClose(pin.id);
-            }
+            this._requestClose?.(pin.id);
         });
     }
 
@@ -138,6 +136,6 @@ export class PinContextMenu {
     destroy() {
         this.close();
         this._pin = null;
-        this._callbacks = null;
+        this._requestClose = null;
     }
 }

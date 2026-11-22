@@ -78,10 +78,6 @@ fn screenshot_stem(prefix: &str, timestamp: &str) -> Result<String> {
             "截图文件名前缀不能为空或包含路径".to_string(),
         ));
     }
-    // 旧设置中的占位符保留原位置，但不再向导出文件名暴露缓存 ID
-    if prefix.contains("{id}") {
-        return Ok(prefix.replace("{id}", timestamp));
-    }
     Ok(format!("{prefix}-{timestamp}"))
 }
 
@@ -161,10 +157,6 @@ mod tests {
         );
         assert_eq!(
             screenshot_stem("笔记.PNG", SAVED_AT).unwrap(),
-            "笔记-20261121-214530"
-        );
-        assert_eq!(
-            screenshot_stem("笔记-{id}.png", SAVED_AT).unwrap(),
             "笔记-20261121-214530"
         );
         assert!(screenshot_stem("../outside", SAVED_AT).is_err());

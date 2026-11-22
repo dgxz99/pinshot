@@ -56,16 +56,6 @@ const FRONTEND_IFACE_XML = `
       <arg type="s" direction="out" name="filename_prefix"/>
       <arg type="b" direction="out" name="notify"/>
     </method>
-    <method name="SelectRegion">
-      <arg type="s" direction="out" name="region_json"/>
-    </method>
-    <method name="UpdateLongshotHud">
-      <arg type="s" direction="in" name="state_json"/>
-      <arg type="b" direction="out" name="ok"/>
-    </method>
-    <signal name="LongshotAction">
-      <arg type="s" name="action"/>
-    </signal>
   </interface>
 </node>
 `;
@@ -101,16 +91,6 @@ export class PinshotDbusService {
                 console.warn(`[pinshot] D-Bus 服务名丢失: ${FRONTEND_BUS_NAME}`);
             }
         );
-    }
-
-    /**
-     * 向正在运行的长图进程广播用户操作（finish / cancel）
-     */
-    emitLongshotAction(action) {
-        if (!this._dbusImpl) {
-            return;
-        }
-        this._dbusImpl.emit_signal('LongshotAction', new GLib.Variant('(s)', [String(action)]));
     }
 
     Ping() {
@@ -184,36 +164,6 @@ export class PinshotDbusService {
             invocation.return_value(new GLib.Variant('(d)', [scale]));
         } catch (error) {
             invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.CaptureFailed`, error.message);
-        }
-    }
-
-    SelectRegionAsync(_params, invocation) {
-        Promise.resolve(this._pinManager.selectRegion())
-            .then(result => {
-                invocation.return_value(new GLib.Variant('(s)', [JSON.stringify(result)]));
-            })
-            .catch(err => {
-                console.error(`[pinshot] SelectRegion 执行失败: ${err}`);
-                const fallback = {
-                    cancelled: true,
-                    monitor_index: 0,
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 0,
-                    scale: 1.0,
-                };
-                invocation.return_value(new GLib.Variant('(s)', [JSON.stringify(fallback)]));
-            });
-    }
-
-    UpdateLongshotHud(stateJson) {
-        try {
-            const state = JSON.parse(stateJson);
-            return Boolean(this._pinManager.updateLongshotHud(state));
-        } catch (err) {
-            console.error(`[pinshot] UpdateLongshotHud 解析或执行失败: ${err}`);
-            return false;
         }
     }
 

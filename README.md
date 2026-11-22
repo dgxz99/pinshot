@@ -2,7 +2,7 @@
 
 Pinshot 是一款面向 Wayland 的截图和贴图工具。它可以把截图、剪贴板中的图片或文字贴在桌面上，方便对照文档、代码和聊天内容。贴图由 GNOME Shell 扩展绘制，不是普通窗口，不会出现在 `Alt+Tab` 列表里。
 
-目前支持 **GNOME Shell 51（Wayland）**，已在 Arch Linux / GNOME Shell 51.1 上验证。滚动长图仍在开发中，现阶段不要使用 `pinshot longshot`。
+目前支持 **GNOME Shell 51（Wayland）**，已在 Arch Linux / GNOME Shell 51.1 上验证。滚动长图仍在开发中，尚未开放使用。
 
 ## 安装
 
@@ -69,11 +69,11 @@ gnome-extensions enable pinshot@dgxz99
 打开扩展首选项的 **「截图」** 页：
 
 - **自动保存到目录**：默认关闭。截图贴图仍保留在历史缓存，但不会额外导出 PNG；需要长期保留时，可右键「保存原图」。开启后，截图贴图会自动导出原图，截图后标注只导出确认后的标注图。
-- **保存目录**：可填绝对路径或 `~/` 开头的路径。留空使用配置文件中的 `general.save_dir`，出厂默认是 `~/Pictures/Screenshots`。
+- **保存目录**：可填绝对路径或 `~/` 开头的路径。留空使用配置文件中的 `general.save_dir`，默认是 `~/Pictures/Pinshots`。
 - **文件名前缀**：默认 `pinshot`。自动保存和手动「保存原图」都会加上保存时的本地时间，如 `pinshot-20261121-214530.png`。同一秒重名会追加 `-1`、`-2`，不会覆盖已有文件。
 - **显示截图完成通知**：默认关闭，只控制从 Pinshot 发起的截图完成通知；不影响手动保存提示，也不影响直接按 `Print` 时 GNOME 自己的保存或通知。
 
-修改目录或文件名前缀后，点击输入框旁的应用按钮保存设置。
+修改目录或文件名前缀后，点击输入框旁的应用按钮保存设置。从旧版更新时，原先的默认目录值会按新默认值使用；自定义目录不变，旧图不会被移动。
 
 ## 缓存、配置和历史
 
@@ -82,7 +82,7 @@ gnome-extensions enable pinshot@dgxz99
 | 历史缓存 | `~/.cache/pinshot/`；设置了 `XDG_CACHE_HOME` 时使用 `$XDG_CACHE_HOME/pinshot/` |
 | Core 配置 | `~/.config/pinshot/config.toml`；设置了 `XDG_CONFIG_HOME` 时使用 `$XDG_CONFIG_HOME/pinshot/config.toml` |
 | 扩展快捷键和截图设置 | GNOME 的 Pinshot 首选项（GSettings） |
-| 导出的永久截图 | 默认 `~/Pictures/Screenshots/`，可在首选项中覆盖 |
+| 导出的永久截图 | 默认 `~/Pictures/Pinshots/`，可在首选项中覆盖 |
 
 用 `pinshot status` 查看实际缓存路径、历史条数和前端状态。缓存里 `images/` 放原图，`thumbs/` 放缩略图，`texts/` 放文字贴图的原文，`index.json` 是历史索引。缓存里的文件名使用内部编号，不是导出文件名；也不要把历史缓存当作永久相册。
 
@@ -101,7 +101,7 @@ pinshot clear-history --all # 同时关闭并删除活跃贴图的缓存，不�
 
 ```toml
 [general]
-save_dir = "~/Pictures/Screenshots" # 首选项未指定保存目录时使用
+save_dir = "~/Pictures/Pinshots"    # 首选项未指定保存目录时使用
 restore_on_startup = false         # 登录时是否恢复上次未关闭的贴图
 notify_on_save = true              # 右键「保存原图」成功后的通知
 

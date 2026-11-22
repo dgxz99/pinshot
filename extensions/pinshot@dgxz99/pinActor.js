@@ -71,11 +71,9 @@ export class PinActor {
         });
         this.actor.add_child(this._imageWidget);
 
-        this._contextMenu = new PinContextMenu(this, {
-            onRequestClose: id => this._callbacks?.onRequestClose?.(id),
-        });
+        this._contextMenu = new PinContextMenu(this, callbacks.onRequestClose);
 
-        this._initGeometry(payload.initial_pos ?? null);
+        this._initGeometry();
         this._loadFullTexture();
         this._applyOpacity(this._opacity);
         this._bindEvents();
@@ -89,18 +87,10 @@ export class PinActor {
         return this._ghost;
     }
 
-    get selected() {
-        return this._selected;
-    }
-
-    get tempHidden() {
-        return this._tempHidden;
-    }
-
     /**
      * 计算初始缩放与弹出位置：单边超过当前显示器工作区 75% 时自动等比收敛，并围绕指针居中
      */
-    _initGeometry(initialPos) {
+    _initGeometry() {
         const [ptrX, ptrY] = global.get_pointer();
         const monitorIndex = this._findMonitorIndexAt(ptrX, ptrY);
         const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
@@ -118,20 +108,11 @@ export class PinActor {
         const w = Math.max(24, Math.round(this._baseWidth * this._scale));
         const h = Math.max(24, Math.round(this._baseHeight * this._scale));
 
-        let x;
-        let y;
-        if (initialPos && Number.isFinite(initialPos.x) && Number.isFinite(initialPos.y)) {
-            x = Math.round(initialPos.x);
-            y = Math.round(initialPos.y);
-        } else {
-            x = Math.round(ptrX - w / 2);
-            y = Math.round(ptrY - h / 2);
-            // 初始弹出尽量完整留在当前显示器工作区内
-            const maxX = workArea.x + Math.max(0, workArea.width - w);
-            const maxY = workArea.y + Math.max(0, workArea.height - h);
-            x = Math.min(Math.max(x, workArea.x), maxX);
-            y = Math.min(Math.max(y, workArea.y), maxY);
-        }
+        // 初始弹出尽量完整留在当前显示器工作区内
+        const maxX = workArea.x + Math.max(0, workArea.width - w);
+        const maxY = workArea.y + Math.max(0, workArea.height - h);
+        const x = Math.min(Math.max(Math.round(ptrX - w / 2), workArea.x), maxX);
+        const y = Math.min(Math.max(Math.round(ptrY - h / 2), workArea.y), maxY);
 
         this.actor.set_size(w, h);
         this.actor.set_position(x, y);

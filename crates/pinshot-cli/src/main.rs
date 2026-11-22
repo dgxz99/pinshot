@@ -15,7 +15,7 @@ use pinshot_core::{annotate, capture};
 #[command(
     name = "pinshot",
     version,
-    about = "轻量级 Wayland 截图、真·非窗口贴图与滚动长图工具"
+    about = "轻量级 Wayland 截图和非窗口贴图工具"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -34,8 +34,6 @@ enum Commands {
     CaptureEdit,
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
-    /// 启动滚动长图录制与实时拼接（M3 实现）
-    Longshot,
     /// 一键切换全部贴图的隐藏/显示状态
     ToggleHide,
     /// 一键解除全部贴图的点击穿透状态
@@ -68,20 +66,10 @@ enum InternalCommands {
     EditSatty { id: String },
     /// 将贴图在历史索引中标记为已关闭
     MarkClosed { id: String },
-    /// 彻底物理删除单条历史及其图片、缩略图、文本
-    DeleteHistory { id: String },
-    /// 以 JSON 格式输出最近历史条目
-    ListHistory { limit: Option<usize> },
     /// 输出前端渲染所需的 `[pin]` 配置 JSON
     GetPinConfig,
-    /// 按 ID 从历史缓存重新弹出贴图
-    RestorePin { id: String },
     /// 若配置开启 restore_on_startup，则恢复上次活跃贴图
     RestoreStartup,
-    /// 执行自定义外部命令钩子（二期）
-    RunHook { hook_name: String, id: String },
-    /// 执行 AI 视觉 OCR 识别（二期）
-    RunOcr { id: String },
 }
 
 fn main() -> Result<()> {
@@ -93,9 +81,6 @@ fn main() -> Result<()> {
         Commands::CapturePin => cmd_capture_pin(),
         Commands::CaptureEdit => cmd_capture_edit(),
         Commands::PinClipboard => cmd_pin_clipboard(),
-        Commands::Longshot => {
-            anyhow::bail!("longshot 将在 M3 阶段接入滚动长图引擎实现");
-        }
         Commands::ToggleHide => cmd_toggle_hide(),
         Commands::UnghostAll => cmd_unghost_all(),
         Commands::RestoreLast => cmd_restore_last(),
@@ -115,12 +100,12 @@ fn cmd_status() -> Result<()> {
     let config_path = Config::default_config_path()?;
     let cfg = Config::load_or_init()?;
     let store = PinStore::open_default()?;
-    let history = store.list_history(usize::MAX)?;
+    let history_count = store.history_count()?;
 
     println!("配置文件: {}", config_path.display());
     println!("缓存目录: {}", store.root_dir().display());
     println!("保存目录: {}", cfg.resolved_save_dir()?.display());
-    println!("历史条目: {}", history.len());
+    println!("历史条目: {history_count}");
 
     match FrontendClient::connect().and_then(|c| {
         let id = c.ping()?;
@@ -215,7 +200,7 @@ fn edit_existing_pin(id: &str) -> Result<()> {
         if let Some(edited) = annotate::edit_png(&source)? {
             let updated = store.replace_entry_image(id, &edited, &config.cache)?;
             anyhow::ensure!(
-                frontend.update_pin(id, &updated.to_payload(None))?,
+                frontend.update_pin(id, &updated.to_payload())?,
                 "前端拒绝更新贴图: {id}"
             );
         }
@@ -281,7 +266,7 @@ fn cmd_pin_clipboard() -> Result<()> {
 /// 将已入库记录推送到前端展示；若推送失败则降级为历史条目防丢失并提示用户
 fn push_pin_to_frontend(store: &PinStore, record: &pinshot_core::store::PinRecord) -> Result<()> {
     let result = FrontendClient::connect().and_then(|client| {
-        let ok = client.create_pin(&record.to_payload(None))?;
+        let ok = client.create_pin(&record.to_payload())?;
         if !ok {
             return Err(pinshot_core::PinshotError::Dbus(
                 "前端拒绝创建贴图".to_string(),
@@ -331,8 +316,7 @@ fn cmd_restore_last() -> Result<()> {
         return Ok(());
     };
 
-    let payload = record.to_payload(None);
-    if client.create_pin(&payload)? {
+    if client.create_pin(&record.to_payload())? {
         store.mark_active(&record.id)?;
     }
     Ok(())
@@ -402,37 +386,9 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             store.mark_closed(&id)?;
             Ok(())
         }
-        InternalCommands::DeleteHistory { id } => {
-            let store = PinStore::open_default()?;
-            store.delete_entry(&id)?;
-            Ok(())
-        }
-        InternalCommands::ListHistory { limit } => {
-            let cfg = Config::load_or_init()?;
-            let store = PinStore::open_default()?;
-            let effective_limit = limit.unwrap_or(cfg.cache.history_menu_limit);
-            let summaries: Vec<_> = store
-                .list_history(effective_limit)?
-                .into_iter()
-                .map(|rec| rec.to_summary())
-                .collect();
-            println!("{}", serde_json::to_string(&summaries)?);
-            Ok(())
-        }
         InternalCommands::GetPinConfig => {
             let cfg = Config::load_or_init()?;
             println!("{}", serde_json::to_string(&cfg.pin)?);
-            Ok(())
-        }
-        InternalCommands::RestorePin { id } => {
-            let store = PinStore::open_default()?;
-            let record = store
-                .get(&id)?
-                .ok_or_else(|| anyhow::anyhow!("未找到历史贴图: {id}"))?;
-            let client = FrontendClient::connect()?;
-            if client.create_pin(&record.to_payload(None))? {
-                store.mark_active(&record.id)?;
-            }
             Ok(())
         }
         InternalCommands::RestoreStartup => {
@@ -443,15 +399,9 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             let store = PinStore::open_default()?;
             let client = FrontendClient::connect()?;
             for record in store.list_active()? {
-                let _ = client.create_pin(&record.to_payload(None));
+                let _ = client.create_pin(&record.to_payload());
             }
             Ok(())
-        }
-        InternalCommands::RunHook { hook_name, id } => {
-            anyhow::bail!("internal run-hook ({hook_name}, {id}) 将在 M4 阶段实现");
-        }
-        InternalCommands::RunOcr { id } => {
-            anyhow::bail!("internal run-ocr ({id}) 将在 M4 阶段实现");
         }
     }
 }

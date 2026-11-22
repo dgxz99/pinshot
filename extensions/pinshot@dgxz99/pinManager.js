@@ -14,7 +14,6 @@ const DEFAULT_PIN_CONFIG = {
     min_visible_edge_px: 32,
     max_texture_edge_px: 4096,
     hide_on_fullscreen: true,
-    follow_all_workspaces: true,
 };
 
 /**
@@ -152,24 +151,6 @@ export class PinManager {
 
     listActivePins() {
         return Array.from(this._pins.values(), pin => pin.toInfo());
-    }
-
-    selectRegion() {
-        // M3 阶段由 regionSelector.js 提供透明全屏框选遮罩
-        return {
-            cancelled: true,
-            monitor_index: 0,
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-            scale: 1.0,
-        };
-    }
-
-    updateLongshotHud(_state) {
-        // M3 阶段由 longshotHud.js 渲染长图悬浮控制条
-        return true;
     }
 
     _selectPin(pin) {

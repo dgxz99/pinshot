@@ -56,6 +56,13 @@ enum Commands {
 
 #[derive(Debug, Subcommand)]
 enum InternalCommands {
+    /// 验证单屏共享与连续采帧，不保存截图或生成长图
+    #[cfg(feature = "longshot")]
+    ProbeLongshot {
+        /// 读取帧数（1–60）
+        #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u32).range(1..=60))]
+        frames: u32,
+    },
     /// 将指定贴图原图写入 Wayland 剪贴板
     CopyImage { id: String },
     /// 将文字贴图对应的原始纯文本写入剪贴板
@@ -339,8 +346,32 @@ fn cmd_clear_history(all: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "longshot")]
+fn cmd_probe_longshot(frames: u32) -> Result<()> {
+    let frames = std::num::NonZeroU32::new(frames).context("采帧数量必须大于零")?;
+    eprintln!("请在系统共享选择器中选择一个显示器；按 Ctrl+C 可取消");
+    let Some(report) = pinshot_core::longshot::probe(frames)? else {
+        println!("屏幕共享已取消或停止");
+        return Ok(());
+    };
+    let (width, height) = report.pixel_size;
+    println!(
+        "已读取 {} 帧，视频尺寸: {width}×{height} 像素",
+        report.frame_count
+    );
+    if let Some((width, height)) = report.logical_size {
+        println!("显示器逻辑尺寸: {width}×{height}");
+    }
+    if let Some((x, y)) = report.logical_position {
+        println!("显示器逻辑位置: ({x}, {y})");
+    }
+    Ok(())
+}
+
 fn handle_internal(action: InternalCommands) -> Result<()> {
     match action {
+        #[cfg(feature = "longshot")]
+        InternalCommands::ProbeLongshot { frames } => cmd_probe_longshot(frames),
         InternalCommands::CopyImage { id } => {
             let store = PinStore::open_default()?;
             let record = store

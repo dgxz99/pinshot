@@ -5,6 +5,8 @@ pub mod config;
 pub mod dbus_client;
 pub mod desktop;
 pub mod error;
+#[cfg(feature = "longshot")]
+pub mod longshot;
 pub mod notify;
 pub mod protocol;
 pub mod store;

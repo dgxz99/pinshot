@@ -27,6 +27,11 @@ pub enum PinshotError {
     #[error("前端 D-Bus 通信失败: {0}")]
     Dbus(String),
 
+    /// 屏幕共享会话或 PipeWire 帧读取失败
+    #[cfg(feature = "longshot")]
+    #[error("长图采帧失败: {0}")]
+    Longshot(String),
+
     /// 未找到指定历史或贴图记录
     #[error("未找到指定记录: {0}")]
     NotFound(String),

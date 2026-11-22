@@ -139,9 +139,8 @@ pinshot/
 │   │       ├── text_render.rs         # 代码检测、Pango 转义、主题感知卡片渲染
 │   │       ├── annotate.rs            # satty 标注回流状态机
 │   │       ├── longshot/
-│   │       │   ├── mod.rs             # 长图会话编排与容错控制
-│   │       │   ├── screencast.rs      # Portal ScreenCast + restore_token
-│   │       │   ├── stream.rs          # GStreamer pipewiresrc 帧采集与选区裁剪
+│   │       │   ├── mod.rs             # Portal ScreenCast 授权与会话清理
+│   │       │   ├── stream.rs          # GStreamer pipewiresrc 帧采集
 │   │       │   └── stitcher.rs        # 纯 Rust 实时帧间重叠匹配与拼接
 │   │       ├── notify.rs              # 轻量桌面通知（空剪贴板/错误/保存提示）
 │   │       ├── hooks.rs               # 自定义外部命令钩子（二期）
@@ -251,14 +250,23 @@ padding_px = 16
 ```
 对于 `pinshot capture-edit`：直接抓屏后调起 `satty`，标注完成后将最终图复制到剪贴板。若开启自动保存，只导出标注后的图。
 
-### 4.6 滚动长图引擎规划（`longshot/`）
-滚动长图完整流程分为 4 个清晰阶段：
+### 4.6 滚动长图（`longshot/`）
+
+**采帧开发验证**：在 GNOME Wayland 会话运行以下命令，并在系统选择器中共享一个显示器：
+
+```bash
+cargo run --locked -p pinshot-cli --features longshot -- internal probe-longshot --frames 12
+```
+
+可选的 `longshot` 构建功能需要 GStreamer Core、App 与 Video 开发库，以及运行时的 `pipewiresrc`、`videorate` 和 `videoconvert` 插件。默认安装流程不启用它。探测命令不请求持久授权，不保存帧、不改剪贴板，也不生成贴图。它报告帧数、像素尺寸，以及 Portal 提供的逻辑尺寸和位置；按 `Ctrl+C` 或取消共享可退出。结束时先停止取帧，再关闭 Portal 会话。
+
+**完整长图流程规划**：
 1. **启动与避让**：
    - 调用前端 `SetSystemHidden(true)` 临时隐藏屏幕上已有贴图，避免遮挡滚动内容；
    - 通过 `ashpd` 请求 `org.freedesktop.portal.ScreenCast` 会话（默认尝试携带 `persist_mode = 2` 与上次缓存的 `restore_token` 以减少重复授权弹窗，失败则平滑回退标准系统选择框）。
 2. **锁定纯滚动内容区**：
    - 调用前端 `SelectRegion()`，在屏幕上弹出全屏半透明框选遮罩，用户框出需要拼接的**纯滚动内容矩形**（天然排除浏览器吸顶栏、左侧菜单和聊天输入框）；
-   - 启动 GStreamer `pipewiresrc fd=<fd> path=<node_id> ! videoconvert ! video/x-raw,format=RGBA ! appsink` 按目标区域裁剪取帧（限频 ~15–20 fps，大幅降低 CPU 占用）。
+   - 复用已实现的 GStreamer 取帧链路：`pipewiresrc` 使用 Portal 提供的文件描述符和节点 ID，限速为 15 fps，输出内存中的 RGBA 像素；按逻辑坐标与视频像素的实际比例映射选区，再裁剪进入拼接流程。
 3. **纯 Rust 实时重叠拼接算法（`stitcher.rs`）**：
    - 保留当前拼接底部窗口的**灰度水平投影/下采样特征条带**（左右各裁掉少量边缘像素如 4%–6%，避免右侧滚动条滑块干扰匹配）；
    - **静止帧去重**：与上一帧全区平均绝对差（MAD）低于极小阈值时直接丢弃；
@@ -370,7 +378,7 @@ padding_px = 16
 
 ### M3：滚动长图（`pinshot longshot`）
 - **交付内容**：
-  - `longshot/screencast.rs`（Portal ScreenCast + `restore_token` 复用）；
+  - `longshot/mod.rs`（Portal ScreenCast 授权与会话清理已接入，`restore_token` 复用待接入）；
   - 前端 `regionSelector.js`（透明框选纯滚动内容区）与 `longshotHud.js`（悬浮控制条：实时高度、快滚告警、完成/取消）；
   - `longshot/stream.rs`（GStreamer `pipewiresrc` 裁剪取帧）与 `longshot/stitcher.rs`（纯 Rust 实时拼接、静止去重、忽略回滚、滚动过快提醒）；
   - 录前自动隐藏旧贴图、录完自动恢复、自动复制剪贴板并按适配高度贴图。

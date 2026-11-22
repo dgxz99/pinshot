@@ -100,12 +100,10 @@ async fn read_frames(
             }
         };
         // PipeWire 可能已缓存选择器尚在屏幕上的首帧；先消费过渡帧，不让它成为画布起点
-        if duration.is_some() {
-            let now = Instant::now();
-            let ready = accept_after.get_or_insert_with(|| now + FIRST_FRAME_SETTLE);
-            if now < *ready {
-                continue;
-            }
+        let now = Instant::now();
+        let ready = accept_after.get_or_insert_with(|| now + FIRST_FRAME_SETTLE);
+        if now < *ready {
+            continue;
         }
         let frame = rgba_frame(&sample)?;
         if dimensions.is_none() {

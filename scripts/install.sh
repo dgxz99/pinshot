@@ -40,12 +40,17 @@ done
 
 if [[ "$SKIP_BUILD" == false ]]; then
     echo "[pinshot] 正在编译 release 二进制..."
-    cargo build --release --manifest-path "${REPO_ROOT}/Cargo.toml" -p pinshot-cli
+    cargo build --release --locked --manifest-path "${REPO_ROOT}/Cargo.toml" -p pinshot-cli --features longshot
 fi
 
 BIN_SRC="${REPO_ROOT}/target/release/pinshot"
 if [[ ! -x "$BIN_SRC" ]]; then
     echo "[pinshot] 未找到可执行文件: ${BIN_SRC}" >&2
+    exit 1
+fi
+
+if ! "${BIN_SRC}" longshot --help >/dev/null 2>&1; then
+    echo "[pinshot] 此二进制无法运行长截图，请检查 GStreamer 运行库或不带 --skip-build 重新安装" >&2
     exit 1
 fi
 

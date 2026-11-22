@@ -32,6 +32,9 @@ enum Commands {
     CapturePin,
     /// 区域截屏并在 Satty 标注，确认后复制图片
     CaptureEdit,
+    /// 框选后滚动，完成时拼接、复制并贴图
+    #[cfg(feature = "longshot")]
+    Longshot,
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
     /// 一键切换全部贴图的隐藏/显示状态
@@ -100,6 +103,10 @@ fn main() -> Result<()> {
         Commands::Status => cmd_status(),
         Commands::CapturePin => cmd_capture_pin(),
         Commands::CaptureEdit => cmd_capture_edit(),
+        #[cfg(feature = "longshot")]
+        Commands::Longshot => cmd_longshot().inspect_err(|error| {
+            notify::warn("Pinshot 长截图", &format!("{error:#}"));
+        }),
         Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::ToggleHide => cmd_toggle_hide(),
         Commands::UnghostAll => cmd_unghost_all(),
@@ -179,6 +186,36 @@ fn cmd_capture_edit() -> Result<()> {
         finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;
     }
     Ok(())
+}
+
+#[cfg(feature = "longshot")]
+fn cmd_longshot() -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    let frontend = FrontendClient::connect()?;
+    let output = frontend.screenshot_settings()?;
+    let Some(recording) = pinshot_core::longshot::record_desktop()? else {
+        return Ok(());
+    };
+    let source_scale = recording.source_scale;
+    let png = recording.png_bytes()?;
+    drop(recording);
+    let store = PinStore::open_default()?;
+    let record = store.add_png_entry(
+        NewEntryRequest {
+            kind: PinKind::Longshot,
+            png_bytes: &png,
+            text_content: None,
+            title_preview: "滚动长截图".to_string(),
+            source_scale,
+            active: true,
+        },
+        &cfg.cache,
+    )?;
+    push_pin_to_frontend(&store, &record)?;
+    if let Err(error) = clipboard::copy_png_file(&record.image_path) {
+        notify::warn("Pinshot", &format!("长图已贴出，但复制失败：{error}"));
+    }
+    finish_screenshot(&cfg, &output, &png, "已完成长截图并贴图")
 }
 
 fn finish_screenshot(

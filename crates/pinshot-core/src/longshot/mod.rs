@@ -1,16 +1,19 @@
 //! 滚动长图的屏幕共享与采帧入口；图像只在内存中处理
 
+mod desktop;
 mod recorder;
 mod region;
 mod stitcher;
 mod stream;
 
+pub use desktop::record_desktop;
 pub use recorder::{Recording, record};
 pub use region::LogicalRegion;
 pub use stitcher::Progress;
 
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
+use std::os::fd::OwnedFd;
 use std::time::Duration;
 
 use ashpd::desktop::screencast::{
@@ -42,30 +45,50 @@ struct Monitor {
     logical_position: Option<(i32, i32)>,
 }
 
-/// 发起系统共享授权并读取指定数量的帧；`None` 表示共享被取消或停止
-pub fn probe(frame_count: NonZeroU32) -> Result<Option<ProbeReport>> {
-    let mut received = 0;
-    let mut pixel_size = (0, 0);
-    let monitor = run_capture(None, |_, frame| {
-        pixel_size = frame.dimensions();
-        received += 1;
-        if received == frame_count.get() {
-            return Ok(ControlFlow::Break(()));
-        }
-        Ok(ControlFlow::Continue(()))
-    })?;
-    Ok(monitor.map(|monitor| ProbeReport {
-        frame_count,
-        pixel_size,
-        logical_size: monitor.logical_size,
-        logical_position: monitor.logical_position,
-    }))
+struct SharedScreen {
+    monitor: Monitor,
+    remote: OwnedFd,
+    node_id: u32,
 }
 
-fn run_capture(
-    duration: Option<Duration>,
-    consume: impl FnMut(Monitor, RgbaImage) -> Result<ControlFlow<()>>,
-) -> Result<Option<Monitor>> {
+impl SharedScreen {
+    async fn read(
+        self,
+        duration: Option<Duration>,
+        consume: impl FnMut(RgbaImage) -> Result<ControlFlow<()>>,
+    ) -> Result<()> {
+        stream::read_pipewire(self.remote, self.node_id, duration, consume).await
+    }
+}
+
+/// 发起系统共享授权并读取指定数量的帧；`None` 表示共享被取消或停止
+pub fn probe(frame_count: NonZeroU32) -> Result<Option<ProbeReport>> {
+    run_capture(async |_, screen| {
+        let monitor = screen.monitor;
+        let mut received = 0;
+        let mut pixel_size = (0, 0);
+        screen
+            .read(None, |frame| {
+                pixel_size = frame.dimensions();
+                received += 1;
+                if received == frame_count.get() {
+                    return Ok(ControlFlow::Break(()));
+                }
+                Ok(ControlFlow::Continue(()))
+            })
+            .await?;
+        Ok(Some(ProbeReport {
+            frame_count,
+            pixel_size,
+            logical_size: monitor.logical_size,
+            logical_position: monitor.logical_position,
+        }))
+    })
+}
+
+fn run_capture<T>(
+    capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
+) -> Result<Option<T>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -104,7 +127,7 @@ fn run_capture(
             Some(Ok((portal, session))) => {
                 let result = tokio::select! {
                     _ = &mut stop_requested => Ok(None),
-                    result = capture_session(&portal, &session, duration, consume) => result,
+                    result = capture_session(&connection, &portal, &session, capture) => result,
                 };
                 close_session(&session).await;
                 result
@@ -119,12 +142,12 @@ fn run_capture(
     })
 }
 
-async fn capture_session(
+async fn capture_session<T>(
+    connection: &zbus::Connection,
     portal: &Screencast,
     session: &Session<Screencast>,
-    duration: Option<Duration>,
-    mut consume: impl FnMut(Monitor, RgbaImage) -> Result<ControlFlow<()>>,
-) -> Result<Option<Monitor>> {
+    capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
+) -> Result<Option<T>> {
     let closed = session
         .receive_closed()
         .await
@@ -155,22 +178,25 @@ async fn capture_session(
         .open_pipe_wire_remote(session, OpenPipeWireRemoteOptions::default())
         .await
         .map_err(|error| failure("连接已授权的 PipeWire 流", error))?;
-    let monitor = Monitor {
-        logical_size: source.size(),
-        logical_position: source.position(),
+    let screen = SharedScreen {
+        monitor: Monitor {
+            logical_size: source.size(),
+            logical_position: source.position(),
+        },
+        remote,
+        node_id: source.pipe_wire_node_id(),
     };
     tokio::select! {
         biased;
         signal = closed.next() => {
-            return if signal.is_some() {
+            if signal.is_some() {
                 Ok(None)
             } else {
                 Err(failure("监听屏幕共享状态", "会话信号流意外结束"))
-            };
+            }
         }
-        result = stream::read_pipewire(remote, source.pipe_wire_node_id(), duration, |frame| consume(monitor, frame)) => result?,
-    };
-    Ok(Some(monitor))
+        result = capture(connection, screen) => result,
+    }
 }
 
 fn portal_response<T>(

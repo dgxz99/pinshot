@@ -101,9 +101,10 @@ export class PinActor {
         let initScale = 1.0;
         if (this._baseWidth > maxInitW || this._baseHeight > maxInitH) {
             initScale = Math.min(maxInitW / this._baseWidth, maxInitH / this._baseHeight);
-            initScale = Math.max(this._config.min_scale, initScale);
         }
-        this._scale = initScale;
+        // 长图的适屏比例可能低于普通贴图下限，滚轮也要能回到该比例
+        this._zoomMin = this.kind === 'longshot' ? Math.min(this._config.min_scale, initScale) : this._config.min_scale;
+        this._scale = Math.max(this._zoomMin, initScale);
 
         const w = Math.max(24, Math.round(this._baseWidth * this._scale));
         const h = Math.max(24, Math.round(this._baseHeight * this._scale));
@@ -266,7 +267,7 @@ export class PinActor {
 
     _zoomAroundPoint(targetScale, anchorStageX, anchorStageY) {
         const nextScale = Math.min(
-            Math.max(targetScale, this._config.min_scale),
+            Math.max(targetScale, this._zoomMin),
             this._config.max_scale
         );
         if (Math.abs(nextScale - this._scale) < 0.001) {

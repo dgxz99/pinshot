@@ -13,6 +13,9 @@
     <key name="pinshot-toggle-hide" type="as">
       <default>[]</default>
     </key>
+    <key name="pinshot-longshot" type="as">
+      <default>['&lt;Super&gt;&lt;Shift&gt;l']</default>
+    </key>
     <key name="pinshot-restore-last" type="as">
       <default>[]</default>
     </key>

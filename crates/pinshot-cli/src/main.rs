@@ -63,6 +63,19 @@ enum InternalCommands {
         #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u32).range(1..=60))]
         frames: u32,
     },
+    /// 实验性定时滚动截图，导出单个 PNG
+    #[cfg(feature = "longshot")]
+    RecordLongshot {
+        /// 所选显示器内的逻辑坐标 x,y,宽,高；省略时使用整屏
+        #[arg(long)]
+        region: Option<pinshot_core::longshot::LogicalRegion>,
+        /// 从首帧开始计时（1–120 秒）
+        #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u16).range(1..=120))]
+        seconds: u16,
+        /// PNG 保存路径（不覆盖已有文件）
+        #[arg(long)]
+        output: std::path::PathBuf,
+    },
     /// 将指定贴图原图写入 Wayland 剪贴板
     CopyImage { id: String },
     /// 将文字贴图对应的原始纯文本写入剪贴板
@@ -368,10 +381,60 @@ fn cmd_probe_longshot(frames: u32) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "longshot")]
+fn cmd_record_longshot(
+    region: Option<pinshot_core::longshot::LogicalRegion>,
+    seconds: u16,
+    output: &std::path::Path,
+) -> Result<()> {
+    use pinshot_core::longshot::{Progress, record};
+    let duration = std::time::Duration::from_secs(seconds.into());
+    anyhow::ensure!(
+        !output
+            .try_exists()
+            .with_context(|| format!("无法检查 {}", output.display()))?,
+        "输出文件已存在: {}",
+        output.display()
+    );
+    eprintln!("请选择显示器；看到「开始滚动」后再向下滚动，Ctrl+C 取消");
+    let mut warned = false;
+    let mut first_height = None;
+    let recording = record(region, duration, |progress| match progress {
+        Progress::Started { height } => {
+            first_height = Some(height);
+            eprintln!("开始滚动，首帧高度 {height} px，{seconds} 秒后结束");
+        }
+        Progress::Unmatched if !warned => {
+            warned = true;
+            eprintln!("未找到可靠重叠，请回滚到上次匹配的位置，再慢慢向下滚动");
+        }
+        Progress::Unchanged | Progress::Extended { .. } => warned = false,
+        Progress::LimitReached { height } => eprintln!("已达到高度上限 {height} px，结束采集"),
+        Progress::Unmatched => {}
+    })?;
+    let Some(recording) = recording else {
+        println!("滚动截图已取消，未保存文件");
+        return Ok(());
+    };
+    let (width, height) = recording.dimensions();
+    if first_height == Some(height) {
+        eprintln!("没有追加新的内容，PNG 只包含首帧");
+    }
+    recording.save_png(output)?;
+    println!("已保存 {width}×{height} PNG: {}", output.display());
+    Ok(())
+}
+
 fn handle_internal(action: InternalCommands) -> Result<()> {
     match action {
         #[cfg(feature = "longshot")]
         InternalCommands::ProbeLongshot { frames } => cmd_probe_longshot(frames),
+        #[cfg(feature = "longshot")]
+        InternalCommands::RecordLongshot {
+            region,
+            seconds,
+            output,
+        } => cmd_record_longshot(region, seconds, &output),
         InternalCommands::CopyImage { id } => {
             let store = PinStore::open_default()?;
             let record = store

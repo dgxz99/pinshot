@@ -1,7 +1,9 @@
 import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {LongshotController} from './longshot.js';
 import {PinshotScreenshot} from './screenshot.js';
 
 export const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
@@ -50,6 +52,24 @@ const FRONTEND_IFACE_XML = `
       <arg type="h" direction="in" name="output_fd"/>
       <arg type="d" direction="out" name="scale"/>
     </method>
+    <method name="SelectLongshot">
+      <arg type="i" direction="in" name="monitor_x"/>
+      <arg type="i" direction="in" name="monitor_y"/>
+      <arg type="i" direction="in" name="monitor_width"/>
+      <arg type="i" direction="in" name="monitor_height"/>
+      <arg type="u" direction="out" name="x"/>
+      <arg type="u" direction="out" name="y"/>
+      <arg type="u" direction="out" name="width"/>
+      <arg type="u" direction="out" name="height"/>
+    </method>
+    <method name="UpdateLongshot">
+      <arg type="u" direction="in" name="height"/>
+      <arg type="b" direction="in" name="warning"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
+    <signal name="LongshotAction">
+      <arg type="s" name="action"/>
+    </signal>
     <method name="GetScreenshotSettings">
       <arg type="b" direction="out" name="auto_save"/>
       <arg type="s" direction="out" name="save_dir"/>
@@ -68,6 +88,10 @@ export class PinshotDbusService {
         this._pinManager = pinManager;
         this._settings = settings;
         this._screenshot = new PinshotScreenshot();
+        this._longshot = new LongshotController(pinManager, (owner, action) => {
+            Gio.DBus.session.emit_signal(owner, FRONTEND_OBJECT_PATH, FRONTEND_INTERFACE_NAME,
+                'LongshotAction', new GLib.Variant('(s)', [action]));
+        });
         this._dbusImpl = null;
         this._busNameId = 0;
     }
@@ -148,8 +172,29 @@ export class PinshotDbusService {
             this._settings.get_boolean('screenshot-notify')];
     }
 
+    async SelectLongshotAsync(geometry, invocation) {
+        try {
+            const ui = Main.screenshotUI;
+            if (ui.visible || ui._openingCoroutineInProgress || ui.screencast_in_progress) {
+                throw new Error('请先退出 GNOME 截图或录屏界面');
+            }
+            const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(), geometry);
+            invocation.return_value(new GLib.Variant('(uuuu)', rect));
+        } catch (error) {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, error.message);
+        }
+    }
+
+    UpdateLongshotAsync([height, warning], invocation) {
+        const updated = this._longshot.update(invocation.get_sender(), height, warning);
+        invocation.return_value(new GLib.Variant('(b)', [updated]));
+    }
+
     async CaptureScreenshotAsync([handle], invocation) {
         try {
+            if (this._longshot.active) {
+                throw new Error('请先完成或取消长截图');
+            }
             const fds = invocation.get_message().get_unix_fd_list();
             if (!fds || handle < 0 || handle >= fds.get_length()) {
                 throw new Error('截图请求缺少有效的输出文件描述符');
@@ -171,6 +216,7 @@ export class PinshotDbusService {
      * 注销 D-Bus 对象并释放总线服务名
      */
     destroy() {
+        this._longshot.destroy();
         this._screenshot.destroy();
         if (this._dbusImpl) {
             try {

@@ -20,3 +20,26 @@
 .pinshot-pin-ghost {
     border: 1px dashed rgba(255, 196, 61, 0.85);
 }
+
+.pinshot-longshot-shade {
+    background-color: rgba(0, 0, 0, 0.52);
+}
+
+.pinshot-longshot-outline {
+    border: 2px solid #78aeed;
+}
+
+.pinshot-longshot-hint,
+.pinshot-longshot-hud {
+    color: white;
+    background-color: rgba(27, 27, 33, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.20);
+    border-radius: 10px;
+    padding: 6px 10px;
+    spacing: 8px;
+}
+
+.pinshot-longshot-button {
+    padding: 4px 10px;
+    border-radius: 6px;
+}

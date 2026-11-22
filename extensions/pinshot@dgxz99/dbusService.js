@@ -112,6 +112,7 @@ export class PinshotDbusService {
                 console.log(`[pinshot] D-Bus 服务已注册: ${FRONTEND_BUS_NAME}`);
             },
             () => {
+                this._longshot.destroy();
                 console.warn(`[pinshot] D-Bus 服务名丢失: ${FRONTEND_BUS_NAME}`);
             }
         );

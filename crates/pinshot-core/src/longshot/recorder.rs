@@ -62,7 +62,7 @@ pub fn record(
     duration: Duration,
     mut update: impl FnMut(Progress),
 ) -> Result<Option<Recording>> {
-    run_capture(async |_, screen| {
+    run_capture(None, async |_, screen| {
         let mut recorder = Recorder::new(screen.monitor, region);
         screen
             .read(Some(duration), |frame| {

@@ -63,7 +63,7 @@ impl SharedScreen {
 
 /// 发起系统共享授权并读取指定数量的帧；`None` 表示共享被取消或停止
 pub fn probe(frame_count: NonZeroU32) -> Result<Option<ProbeReport>> {
-    run_capture(async |_, screen| {
+    run_capture(None, async |_, screen| {
         let monitor = screen.monitor;
         let mut received = 0;
         let mut pixel_size = (0, 0);
@@ -87,6 +87,7 @@ pub fn probe(frame_count: NonZeroU32) -> Result<Option<ProbeReport>> {
 }
 
 fn run_capture<T>(
+    reservation: Option<&str>,
     capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
 ) -> Result<Option<T>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -110,6 +111,17 @@ fn run_capture<T>(
         let connection = zbus::Connection::session()
             .await
             .map_err(|error| failure("连接会话 D-Bus", error))?;
+        // 在打开授权对话框前占用录制名，避免再次触发时把选择器叠进当前录制
+        if let Some(name) = reservation {
+            match connection
+                .request_name_with_flags(name, zbus::fdo::RequestNameFlags::DoNotQueue.into())
+                .await
+            {
+                Ok(_) => {}
+                Err(zbus::Error::NameTaken) => return Ok(None),
+                Err(error) => return Err(failure("预留长截图会话", error)),
+            }
+        }
         let start = async {
             let portal = Screencast::with_connection(connection.clone())
                 .await

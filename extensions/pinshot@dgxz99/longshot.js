@@ -22,7 +22,6 @@ class RegionSelector {
         };
         this._origin = null;
         this._grab = null;
-        this._eventId = 0;
     }
 
     select() {
@@ -59,7 +58,14 @@ class RegionSelector {
                 this.close();
             }
         });
-        this._eventId = global.stage.connect('captured-event', (_stage, event) => this._onEvent(event));
+        this._layer.connect('captured-event', (_actor, event) => this._onEvent(event));
+        this._layer.connect('destroy', () => {
+            // Shell 在关闭时可能先销毁场景节点；Main 会随节点自动释放 modal grab
+            this._layer = null;
+            this._clearGrabHandler();
+            this._grab = null;
+            this._resolveSelection(CANCELLED);
+        });
         return new Promise(resolve => {
             this._resolve = resolve;
         });
@@ -132,20 +138,21 @@ class RegionSelector {
     }
 
     close(rect = CANCELLED) {
-        if (this._eventId) {
-            global.stage.disconnect(this._eventId);
-            this._eventId = 0;
-        }
-        if (this._grab) {
-            if (this._revokedId) {
-                this._grab.disconnect(this._revokedId);
-                this._revokedId = 0;
-            }
-            Main.popModal(this._grab);
-            this._grab = null;
-        }
+        this._clearGrabHandler();
+        this._resolveSelection(rect);
         this._layer?.destroy();
         this._layer = null;
+        this._grab = null;
+    }
+
+    _clearGrabHandler() {
+        if (this._revokedId) {
+            this._grab.disconnect(this._revokedId);
+            this._revokedId = 0;
+        }
+    }
+
+    _resolveSelection(rect) {
         const resolve = this._resolve;
         this._resolve = null;
         resolve?.(rect);
@@ -167,6 +174,9 @@ export class LongshotController {
     async select(owner, connection, geometry) {
         if (this.active) {
             throw new Error('已有长截图正在运行');
+        }
+        if (Main.sessionMode.isLocked) {
+            return CANCELLED;
         }
         const [x, y, width, height] = geometry;
         const monitor = Main.layoutManager.monitors.find(candidate =>
@@ -211,6 +221,9 @@ export class LongshotController {
         hud.set_position(x + Math.round((width - hudWidth) / 2), y + height - HUD_SPACE + 8);
         hud.set_size(hudWidth, 48);
         session.hud = hud;
+        hud.connect('destroy', () => {
+            session.hud = null;
+        });
         session.status = new St.Label({text: '正在准备，暂不要滚动…', x_expand: true,
             y_align: Clutter.ActorAlign.CENTER});
         session.status.clutter_text.ellipsize = Pango.EllipsizeMode.END;
@@ -260,10 +273,13 @@ export class LongshotController {
         if (this._session !== session) {
             return;
         }
-        if (!session.selector) {
-            this._emitAction(session.owner, 'cancel');
+        try {
+            if (!session.selector) {
+                this._emitAction(session.owner, 'cancel');
+            }
+        } finally {
+            this._close(session);
         }
-        this._close(session);
     }
 
     _close(session) {

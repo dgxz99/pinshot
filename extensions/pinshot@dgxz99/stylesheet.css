@@ -29,11 +29,18 @@
     border: 2px solid #78aeed;
 }
 
+.pinshot-selection-handle {
+    background-color: #78aeed;
+    border: 1px solid white;
+    border-radius: 2px;
+}
+
 .pinshot-longshot-recording-edge {
     background-color: #78aeed;
 }
 
 .pinshot-selection-hint,
+.pinshot-selection-toolbar,
 .pinshot-longshot-hud {
     color: white;
     background-color: rgba(27, 27, 33, 0.98);
@@ -43,7 +50,12 @@
     spacing: 8px;
 }
 
+.pinshot-selection-button,
 .pinshot-longshot-button {
     padding: 4px 10px;
     border-radius: 6px;
+}
+
+.pinshot-selection-primary {
+    color: #b9d9ff;
 }

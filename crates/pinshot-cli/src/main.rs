@@ -4,12 +4,13 @@ use std::fs;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use pinshot_core::annotate;
+use pinshot_core::capture::{self, CapturedImage, ScreenshotAction};
 use pinshot_core::clipboard::{self, ClipboardContent};
 use pinshot_core::protocol::PinKind;
 use pinshot_core::store::NewEntryRequest;
 use pinshot_core::text_render;
 use pinshot_core::{Config, FrontendClient, PinStore, notify};
-use pinshot_core::{annotate, capture};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -105,8 +106,8 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Ping => cmd_ping(),
         Commands::Status => cmd_status(),
-        Commands::CapturePin => cmd_capture_pin(),
-        Commands::CaptureEdit => cmd_capture_edit(),
+        Commands::CapturePin => cmd_capture(ScreenshotAction::Pin),
+        Commands::CaptureEdit => cmd_capture(ScreenshotAction::Edit),
         #[cfg(feature = "longshot")]
         Commands::Longshot { choose_screen } => cmd_longshot(choose_screen).inspect_err(|error| {
             notify::warn("Pinshot 长截图", &format!("{error:#}"));
@@ -155,12 +156,20 @@ fn cmd_status() -> Result<()> {
     Ok(())
 }
 
-fn cmd_capture_pin() -> Result<()> {
-    let cfg = Config::load_or_init()?;
+fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
     let frontend = FrontendClient::connect()?;
-    let Some(captured) = capture::capture_interactive_region(&frontend)? else {
+    let Some(captured) = capture::capture_interactive_region(&frontend, default_action)? else {
         return Ok(());
     };
+    match captured.action {
+        ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(&captured.png_bytes)?),
+        ScreenshotAction::Pin => pin_screenshot(&frontend, captured),
+        ScreenshotAction::Edit => edit_screenshot(&frontend, &captured.png_bytes),
+    }
+}
+
+fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage) -> Result<()> {
+    let cfg = Config::load_or_init()?;
     let output = frontend.screenshot_settings()?;
     let store = PinStore::open_default()?;
     let record = store.add_png_entry(
@@ -182,12 +191,9 @@ fn cmd_capture_pin() -> Result<()> {
     finish_screenshot(&cfg, &output, &captured.png_bytes, "已截图并贴图")
 }
 
-fn cmd_capture_edit() -> Result<()> {
-    let cfg = Config::load_or_init()?;
-    let frontend = FrontendClient::connect()?;
-    if let Some(captured) = capture::capture_interactive_region(&frontend)?
-        && let Some(edited) = annotate::edit_png(&captured.png_bytes)?
-    {
+fn edit_screenshot(frontend: &FrontendClient, png: &[u8]) -> Result<()> {
+    if let Some(edited) = annotate::edit_png(png)? {
+        let cfg = Config::load_or_init()?;
         let output = frontend.screenshot_settings()?;
         clipboard::copy_png_bytes(&edited)?;
         finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;

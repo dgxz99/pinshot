@@ -75,6 +75,8 @@ export class LongshotController {
             bounds: {left: left + OUTLINE_MARGIN, top: top + OUTLINE_MARGIN,
                 right: left + workArea.width - OUTLINE_MARGIN, bottom},
             minEdge: MIN_EDGE,
+            actions: [{id: 'start', label: '开始录制'}],
+            defaultAction: 'start',
             hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24,
                 text: '拖动框选滚动内容 · Esc 取消'},
         });
@@ -90,11 +92,12 @@ export class LongshotController {
                     this._cancel(session);
                 }
             });
-            const rect = await session.selector.select();
-            if (this._session !== session || rect[2] === 0) {
+            const selection = await session.selector.select();
+            if (this._session !== session || !selection) {
                 this._close(session);
                 return CANCELLED_REGION;
             }
+            const {rect} = selection;
             session.selector = null;
             session.outline = showRecordingOutline(monitor, rect);
             session.outline.connect('destroy', () => {

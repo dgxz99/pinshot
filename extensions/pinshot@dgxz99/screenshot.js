@@ -7,6 +7,14 @@ import {RegionSelector} from './regionSelector.js';
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
+const SCREENSHOT_ACTIONS = [
+    {id: 'copy', label: '复制', shortcut: {key: 'c', label: 'Ctrl+C', control: true}},
+    {id: 'pin', label: '贴图', shortcut: {key: 'p', label: 'P'}},
+    {id: 'edit', label: '编辑', shortcut: {key: 'e', label: 'E'}},
+];
+const LEGACY_ACTIONS = [{id: 'confirm', label: '确认'}];
+const CANCELLED = [0, ''];
+
 /** 避免在系统截图或录屏已经打开时叠加 Pinshot 框选 */
 export function nativeScreenshotActive() {
     const ui = Main.screenshotUI;
@@ -23,12 +31,17 @@ export class PinshotScreenshot {
         return this._session !== null;
     }
 
-    async capture(stream, owner, connection) {
+    async capture(stream, owner, connection, defaultAction) {
+        const actions = defaultAction === null ? LEGACY_ACTIONS : SCREENSHOT_ACTIONS;
+        const initialAction = defaultAction ?? 'confirm';
+        if (!actions.some(({id}) => id === initialAction)) {
+            throw new Error('无效的截图默认动作');
+        }
         if (this.active || nativeScreenshotActive()) {
             throw new Error('请先完成或取消当前截图');
         }
         if (Main.sessionMode.isLocked) {
-            return 0;
+            return CANCELLED;
         }
         const session = {selector: null, cancellable: new Gio.Cancellable()};
         this._session = session;
@@ -45,21 +58,22 @@ export class PinshotScreenshot {
             const [width, height] = global.stage.get_size();
             const [content, scale] = await new Shell.Screenshot().screenshot_stage_to_content();
             if (session.cancellable.is_cancelled() || nativeScreenshotActive()) {
-                return 0;
+                return CANCELLED;
             }
             session.selector = new RegionSelector({x: 0, y: 0, width, height}, {
-                name: 'pinshot-screenshot-selector', background: content,
+                name: 'pinshot-screenshot-selector', background: content, actions, defaultAction: initialAction,
             });
-            const rect = await session.selector.select();
+            const selection = await session.selector.select();
             session.selector = null;
-            if (rect[2] === 0 || session.cancellable.is_cancelled()) {
-                return 0;
+            if (!selection || session.cancellable.is_cancelled()) {
+                return CANCELLED;
             }
+            const {rect, action} = selection;
             await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);
-            return session.cancellable.is_cancelled() ? 0 : scale;
+            return session.cancellable.is_cancelled() ? CANCELLED : [scale, action];
         } catch (error) {
             if (session.cancellable.is_cancelled()) {
-                return 0;
+                return CANCELLED;
             }
             throw error;
         } finally {

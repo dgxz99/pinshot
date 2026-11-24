@@ -102,7 +102,8 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
-| `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 冻结桌面并直接框选，把鼠标松开时的选区 PNG 写入调用方的临时文件 |
+| `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 冻结画面后可调整选区；确认时写入 PNG，并返回纹理倍率和用户选定的 `copy`、`pin` 或 `edit`；取消返回 `0` 与空字符串 |
+| `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
@@ -276,7 +277,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 - 拼接先在已拼接尾部搜索最匹配的位置，再用 RGB 采样复核。静止、已包含的回滚和位置不明确的帧不追加；只有确认重叠才追加底部新行。默认画布上限为 24,000 像素高和 192 MiB RGBA，以先到者为准。
 
 **桌面流程（`pinshot longshot`）**：
-1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。根据 Portal 返回的逻辑矩形在该屏幕内框选正文；短时抓取输入，框选完立即释放，框选和录制期间隐藏既有贴图。
+1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。根据 Portal 返回的逻辑矩形在该屏幕内框选正文；短时抓取输入，确认最终选区后立即释放，框选和录制期间隐藏既有贴图。
 2. 录制时在固定选区外绘制不接收输入的边框，给向外取整的像素裁剪留出间隙。选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
 3. 先停止取帧与 Portal 会话，再结束持有 UI 的 D-Bus 连接，由扩展恢复旧贴图。确认完成后复用 Pinshot 的缓存、剪贴板、贴图和截图导出设置。
 
@@ -317,7 +318,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 
 **扩展快捷键设置**：可在 GNOME「扩展」应用打开 Pinshot 首选项，或运行 `gnome-extensions prefs pinshot@dgxz99`。默认 `Super+Shift+P` 区域截图并贴图、`Super+Shift+V` 剪贴板贴图、`Super+Shift+U` 解除全部穿透。区域截图后标注、显示／隐藏全部贴图、恢复最近贴图默认未绑定。各项可改绑、禁用或恢复默认，不修改 GNOME 系统里的自定义绑定。贴图局部按键只有在 Shell 将键盘事件交给贴图时才生效，也可用右键菜单完成相应操作。
 
-**截图输出设置**：Pinshot 发起的普通截图用 Shell 抓取单张冻结画面，与长截图共用拖拽框选。松开鼠标后将选区 PNG 交给 Core，不使用 ScreenCast Portal，也不接管 GNOME 原生截图界面。常规 `Print` 仍提供原有框选、整屏、窗口和录屏入口。
+**截图输出设置**：Pinshot 发起的普通截图用 Shell 抓取单张冻结画面，与长截图共用拖拽框选。松开鼠标后保留选框，允许移动或拖动手柄调整。用户选择复制、贴图或编辑后才裁剪已冻结的画面，将 PNG 与动作交给 Core，不使用 ScreenCast Portal，也不接管 GNOME 原生截图界面。常规 `Print` 仍提供原有框选、整屏、窗口和录屏入口。
 
 扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Pinshots`），文件名默认为 `pinshot-YYYYMMDD-HHMMSS.png`，以实际保存时的本地时间命名；同一秒重名则追加数字序号，不覆盖旧图。
 

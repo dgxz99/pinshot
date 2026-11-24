@@ -26,6 +26,11 @@ trait Frontend1 {
     fn unghost_all(&self) -> zbus::Result<u32>;
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
+    fn select_screenshot(
+        &self,
+        output_fd: Fd<'_>,
+        default_action: &str,
+    ) -> zbus::Result<(f64, String)>;
     fn get_screenshot_settings(&self) -> zbus::Result<(bool, String, String, bool)>;
 }
 
@@ -94,11 +99,26 @@ impl FrontendClient {
         Ok(items)
     }
 
-    /// 打开原生截图界面并把 PNG 写入调用方的文件；用户取消时返回 0
-    pub(crate) fn capture_screenshot(&self, output: &File) -> Result<f64> {
-        self.proxy
-            .capture_screenshot(Fd::from(output.as_fd()))
-            .map_err(map_zbus_err)
+    /// 返回用户确认的动作和 PNG 缩放；旧版扩展仅支持入口指定的动作
+    pub(crate) fn select_screenshot(
+        &self,
+        output: &File,
+        default_action: &str,
+    ) -> Result<(f64, String)> {
+        let fd = Fd::from(output.as_fd());
+        let selection = self.proxy.select_screenshot(fd, default_action);
+        match selection {
+            Err(zbus::Error::MethodError(name, _, _))
+                if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" =>
+            {
+                let scale = self
+                    .proxy
+                    .capture_screenshot(Fd::from(output.as_fd()))
+                    .map_err(map_zbus_err)?;
+                Ok((scale, default_action.to_owned()))
+            }
+            result => result.map_err(map_zbus_err),
+        }
     }
 
     /// 查询扩展首选项设置的截图输出策略

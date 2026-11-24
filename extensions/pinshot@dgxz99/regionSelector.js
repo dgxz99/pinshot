@@ -4,18 +4,35 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {containsPoint, handleAt, handlesFor, moveRegion, regionBetween, resizeRegion,
+    toolbarMonitor, toolbarPosition} from './selectionGeometry.js';
+
+const HANDLE_SIZE = 8;
+const HANDLE_RADIUS = 7;
+const SHORTCUT_MODIFIERS = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.CONTROL_MASK |
+    Clutter.ModifierType.MOD1_MASK | Clutter.ModifierType.SUPER_MASK | Clutter.ModifierType.META_MASK |
+    Clutter.ModifierType.HYPER_MASK;
+const CURSORS = [
+    [Clutter.CursorType.NW_RESIZE, Clutter.CursorType.N_RESIZE, Clutter.CursorType.NE_RESIZE],
+    [Clutter.CursorType.W_RESIZE, Clutter.CursorType.MOVE, Clutter.CursorType.E_RESIZE],
+    [Clutter.CursorType.SW_RESIZE, Clutter.CursorType.S_RESIZE, Clutter.CursorType.SE_RESIZE],
+];
+
 export const CANCELLED_REGION = [0, 0, 0, 0];
 
-/** 只在用户明确框选时抓取输入，框选完立即归还应用焦点 */
+/** 保留可调整的选区，只有确认或取消才结束模态并归还输入 */
 export class RegionSelector {
-    constructor(area, {name, bounds, minEdge = 1, hint = null, background = null}) {
+    constructor(area, {name, bounds, minEdge = 8, hint = null, background = null, actions, defaultAction}) {
         this._area = area;
         this._name = name;
         this._bounds = bounds ?? {left: 0, top: 0, right: area.width, bottom: area.height};
         this._minEdge = minEdge;
         this._hintPlacement = hint;
         this._background = background;
-        this._origin = null;
+        this._actions = actions;
+        this._defaultAction = defaultAction;
+        this._rect = null;
+        this._drag = null;
         this._grab = null;
     }
 
@@ -27,14 +44,12 @@ export class RegionSelector {
         });
         this._layer.set_cursor_type(Clutter.CursorType.CROSSHAIR);
         this._shades = Array.from({length: 4}, () => new St.Widget({style_class: 'pinshot-selection-shade'}));
-        this._outline = new St.Widget({style_class: 'pinshot-selection-outline'});
-        for (const actor of [...this._shades, this._outline]) {
+        this._outline = new St.Widget({name: 'pinshot-selection-rect', style_class: 'pinshot-selection-outline'});
+        this._handles = Array.from({length: 8}, () => new St.Widget({
+            style_class: 'pinshot-selection-handle', width: HANDLE_SIZE, height: HANDLE_SIZE, visible: false,
+        }));
+        for (const actor of [...this._shades, this._outline, ...this._handles]) {
             this._layer.add_child(actor);
-        }
-        this._outline.hide();
-        this._shades[0].set_size(width, height);
-        for (const shade of this._shades.slice(1)) {
-            shade.hide();
         }
         if (this._hintPlacement) {
             const {x: hintX, y: hintY, width: hintWidth, text} = this._hintPlacement;
@@ -44,6 +59,9 @@ export class RegionSelector {
             this._hint.set_width(hintWidth);
             this._layer.add_child(this._hint);
         }
+        this._toolbar = this._createToolbar();
+        this._layer.add_child(this._toolbar);
+        this._draw(null);
         Main.layoutManager.uiGroup.add_child(this._layer);
         this._grab = Main.pushModal(this._layer, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
         if (this._grab.is_revoked()) {
@@ -61,63 +79,160 @@ export class RegionSelector {
             this._layer = null;
             this._clearGrabHandler();
             this._grab = null;
-            this._resolveSelection(CANCELLED_REGION);
+            this._resolveSelection(null);
         });
         return new Promise(resolve => {
             this._resolve = resolve;
         });
     }
 
+    _createToolbar() {
+        const toolbar = new St.BoxLayout({name: 'pinshot-selection-toolbar',
+            style_class: 'pinshot-selection-toolbar', reactive: true, visible: false});
+        toolbar.set_cursor_type(Clutter.CursorType.DEFAULT);
+        for (const {id, label, shortcut} of this._actions) {
+            const hint = shortcut?.label ?? (id === this._defaultAction ? 'Enter' : null);
+            const button = new St.Button({name: `pinshot-selection-action-${id}`,
+                label: hint ? `${label}  ${hint}` : label,
+                style_class: 'pinshot-selection-button button', reactive: true, track_hover: true});
+            if (id === this._defaultAction) {
+                button.add_style_class_name('pinshot-selection-primary');
+            }
+            button.connect('clicked', () => this._confirm(id));
+            toolbar.add_child(button);
+        }
+        return toolbar;
+    }
+
     _onEvent(event) {
         const type = event.type();
-        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
+        if (!this._layer || type === Clutter.EventType.ENTER || type === Clutter.EventType.LEAVE) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (type === Clutter.EventType.KEY_PRESS) {
+            this._onKey(event);
+        } else if (type === Clutter.EventType.BUTTON_PRESS && event.get_button() === Clutter.BUTTON_SECONDARY) {
             this.close();
-        } else if (type === Clutter.EventType.BUTTON_PRESS) {
-            if (event.get_button() === Clutter.BUTTON_PRIMARY) {
-                this._origin = this._pointAt(event, false);
-                if (this._origin) {
-                    this._draw(this._origin);
-                }
-            } else if (event.get_button() === Clutter.BUTTON_SECONDARY) {
-                this.close();
-            }
-        } else if (this._origin && type === Clutter.EventType.MOTION) {
-            this._draw(this._pointAt(event, true));
-        } else if (this._origin && type === Clutter.EventType.BUTTON_RELEASE &&
-            event.get_button() === Clutter.BUTTON_PRIMARY) {
-            const rect = this._rectAt(this._pointAt(event, true));
-            if (rect[2] >= this._minEdge && rect[3] >= this._minEdge) {
-                this.close(rect);
-            } else {
-                this._draw(this._origin);
-                this._origin = null;
-                if (this._hint) {
-                    this._hint.text = '区域太小，请重新拖动 · Esc 取消';
+        } else if (type === Clutter.EventType.MOTION || type === Clutter.EventType.BUTTON_PRESS ||
+            type === Clutter.EventType.BUTTON_RELEASE) {
+            if (!this._drag && this._toolbar.visible) {
+                const target = global.stage.get_event_actor(event);
+                if (target && this._toolbar.contains(target)) {
+                    return Clutter.EVENT_PROPAGATE;
                 }
             }
+            this._onPointer(type, event);
         }
         return Clutter.EVENT_STOP;
     }
 
-    _pointAt(event, clamp) {
-        const {left, top, right, bottom} = this._bounds;
-        const [stageX, stageY] = event.get_coords();
-        const x = Math.round(stageX - this._area.x);
-        const y = Math.round(stageY - this._area.y);
-        if (!clamp && (x < left || x >= right || y < top || y >= bottom)) {
-            return null;
+    _onKey(event) {
+        const key = event.get_key_symbol();
+        if (key === Clutter.KEY_Escape) {
+            this.close();
+            return;
         }
+        if (!this._rect || this._drag) {
+            return;
+        }
+        const modifiers = event.get_state() & SHORTCUT_MODIFIERS;
+        if (modifiers === 0 && (key === Clutter.KEY_Return || key === Clutter.KEY_KP_Enter)) {
+            this._confirm(this._defaultAction);
+            return;
+        }
+        const character = String.fromCodePoint(Clutter.keysym_to_unicode(key)).toLowerCase();
+        const action = this._actions.find(({shortcut}) => shortcut && shortcut.key === character &&
+            modifiers === (shortcut.control ? Clutter.ModifierType.CONTROL_MASK : 0));
+        if (action) {
+            this._confirm(action.id);
+        }
+    }
+
+    _onPointer(type, event) {
+        if (type === Clutter.EventType.MOTION) {
+            const point = this._pointAt(event);
+            if (this._drag) {
+                this._draw(this._dragRegion(point));
+            } else {
+                this._updateCursor(point);
+            }
+        } else if (type === Clutter.EventType.BUTTON_PRESS && event.get_button() === Clutter.BUTTON_PRIMARY) {
+            this._startDrag(this._pointAt(event));
+        } else if (this._drag && type === Clutter.EventType.BUTTON_RELEASE &&
+            event.get_button() === Clutter.BUTTON_PRIMARY) {
+            this._endDrag(this._pointAt(event));
+        }
+    }
+
+    _pointAt(event) {
+        const [x, y] = event.get_coords();
+        return [Math.round(x - this._area.x), Math.round(y - this._area.y)];
+    }
+
+    _clampPoint([x, y]) {
+        const {left, top, right, bottom} = this._bounds;
         return [Math.min(Math.max(left, x), right), Math.min(Math.max(top, y), bottom)];
     }
 
-    _rectAt(point) {
-        const [x, y] = this._origin;
-        return [Math.min(x, point[0]), Math.min(y, point[1]),
-            Math.abs(point[0] - x), Math.abs(point[1] - y)];
+    _operationAt(point) {
+        if (!this._rect) {
+            return null;
+        }
+        return handleAt(this._rect, point, HANDLE_RADIUS) ??
+            (containsPoint(this._rect, point) ? [0, 0] : null);
     }
 
-    _draw(point) {
-        const [x, y, width, height] = this._rectAt(point);
+    _updateCursor(point) {
+        const operation = this._operationAt(point);
+        let cursor = Clutter.CursorType.CROSSHAIR;
+        if (operation) {
+            const [hx, hy] = operation;
+            cursor = CURSORS[hy + 1][hx + 1];
+        }
+        this._layer.set_cursor_type(cursor);
+    }
+
+    _startDrag(point) {
+        const [x, y] = point;
+        const operation = this._operationAt(point);
+        const {left, top, right, bottom} = this._bounds;
+        if (!operation && (x < left || x >= right || y < top || y >= bottom)) {
+            return;
+        }
+        this._updateCursor(point);
+        this._drag = {origin: point, operation};
+        this._toolbar.hide();
+        this._draw(this._dragRegion(point));
+    }
+
+    _dragRegion(point) {
+        const {origin, operation} = this._drag;
+        if (!operation) {
+            return regionBetween(origin, this._clampPoint(point));
+        }
+        const [hx, hy] = operation;
+        const delta = [point[0] - origin[0], point[1] - origin[1]];
+        if (hx === 0 && hy === 0) {
+            return moveRegion(this._rect, delta, this._bounds);
+        }
+        return resizeRegion(this._rect, operation, delta, this._bounds, this._minEdge);
+    }
+
+    _endDrag(point) {
+        const rect = this._dragRegion(point);
+        this._drag = null;
+        if (rect[2] >= this._minEdge && rect[3] >= this._minEdge) {
+            this._rect = rect;
+        } else if (this._hint) {
+            this._hint.text = '区域太小，请重新拖动 · Esc 取消';
+        }
+        this._draw(this._rect);
+        this._updateCursor(point);
+        this._showToolbar();
+    }
+
+    _draw(rect) {
+        const [x, y, width, height] = rect ?? CANCELLED_REGION;
         const right = x + width;
         const bottom = y + height;
         const areas = [
@@ -129,18 +244,51 @@ export class RegionSelector {
         for (const [index, [sx, sy, sw, sh]] of areas.entries()) {
             this._shades[index].set_position(sx, sy);
             this._shades[index].set_size(sw, sh);
-            this._shades[index].show();
+            this._shades[index].visible = sw > 0 && sh > 0;
         }
         this._outline.set_position(x, y);
         this._outline.set_size(width, height);
         this._outline.visible = width > 0 && height > 0;
+        for (const [index, [, , hx, hy]] of handlesFor(this._outline.visible ? rect : CANCELLED_REGION).entries()) {
+            const handle = this._handles[index];
+            handle.set_position(hx - HANDLE_SIZE / 2, hy - HANDLE_SIZE / 2);
+            handle.visible = Boolean(rect && !this._drag);
+        }
+        if (this._hint) {
+            this._hint.visible = !rect && !this._drag;
+        }
     }
 
-    close(rect = CANCELLED_REGION) {
+    _showToolbar() {
+        if (!this._rect) {
+            return;
+        }
+        const [x, y, width, height] = this._rect;
+        const absolute = [x + this._area.x, y + this._area.y, width, height];
+        const monitor = toolbarMonitor(absolute, Main.layoutManager.monitors);
+        if (!monitor) {
+            return;
+        }
+        this._toolbar.show();
+        const [, tw] = this._toolbar.get_preferred_width(-1);
+        const [, th] = this._toolbar.get_preferred_height(tw);
+        const [tx, ty] = toolbarPosition(absolute, [tw, th], monitor);
+        this._toolbar.set_position(tx - this._area.x, ty - this._area.y);
+        this._toolbar.set_size(tw, th);
+    }
+
+    _confirm(action) {
+        if (this._rect && !this._drag) {
+            this.close({rect: this._rect, action});
+        }
+    }
+
+    close(result = null) {
         this._clearGrabHandler();
-        this._resolveSelection(rect);
-        this._layer?.destroy();
+        this._resolveSelection(result);
+        const layer = this._layer;
         this._layer = null;
+        layer?.destroy();
         this._grab = null;
     }
 
@@ -151,9 +299,9 @@ export class RegionSelector {
         }
     }
 
-    _resolveSelection(rect) {
+    _resolveSelection(result) {
         const resolve = this._resolve;
         this._resolve = null;
-        resolve?.(rect);
+        resolve?.(result);
     }
 }

@@ -12,9 +12,39 @@ use crate::error::{PinshotError, Result};
 const DEFAULT_FILENAME_PREFIX: &str = "pinshot";
 const EXPORT_TIME_FORMAT: &str = "%Y%m%d-%H%M%S";
 
-/// 区域截屏成功后的输出图像
+/// 框选完成后用户明确选择的截图交付动作
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenshotAction {
+    Copy,
+    Pin,
+    Edit,
+}
+
+impl ScreenshotAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Copy => "copy",
+            Self::Pin => "pin",
+            Self::Edit => "edit",
+        }
+    }
+
+    fn from_wire(action: &str) -> Result<Self> {
+        match action {
+            "copy" => Ok(Self::Copy),
+            "pin" => Ok(Self::Pin),
+            "edit" => Ok(Self::Edit),
+            _ => Err(PinshotError::Dbus(format!(
+                "前端返回无效的截图动作：{action}"
+            ))),
+        }
+    }
+}
+
+/// 区域截屏成功后的输出图像和交付动作
 #[derive(Debug)]
 pub struct CapturedImage {
+    pub action: ScreenshotAction,
     pub png_bytes: Vec<u8>,
     pub source_scale: f64,
 }
@@ -104,11 +134,14 @@ fn persist_unique_png(
     }
 }
 
-/// 打开 GNOME 原生截图界面；匿名临时文件只用来传输 PNG，不在截图目录落盘
-pub fn capture_interactive_region(frontend: &FrontendClient) -> Result<Option<CapturedImage>> {
+/// 打开 Pinshot 框选；匿名临时文件只用来传输 PNG，不在截图目录落盘
+pub fn capture_interactive_region(
+    frontend: &FrontendClient,
+    default_action: ScreenshotAction,
+) -> Result<Option<CapturedImage>> {
     let temp_dir = std::env::temp_dir();
     let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
-    let source_scale = frontend.capture_screenshot(&file)?;
+    let (source_scale, action) = frontend.select_screenshot(&file, default_action.as_str())?;
     if source_scale == 0.0 {
         return Ok(None);
     }
@@ -117,12 +150,14 @@ pub fn capture_interactive_region(frontend: &FrontendClient) -> Result<Option<Ca
             "无效的截图缩放：{source_scale}"
         )));
     }
+    let action = ScreenshotAction::from_wire(&action)?;
     let mut png_bytes = Vec::new();
     file.rewind()
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
     file.read_to_end(&mut png_bytes)
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
     Ok(Some(CapturedImage {
+        action,
         png_bytes,
         source_scale,
     }))
@@ -148,6 +183,22 @@ mod tests {
     use super::*;
 
     const SAVED_AT: &str = "20261121-214530";
+
+    #[test]
+    fn screenshot_action_round_trips_without_an_implicit_default() {
+        for action in [
+            ScreenshotAction::Copy,
+            ScreenshotAction::Pin,
+            ScreenshotAction::Edit,
+        ] {
+            assert_eq!(
+                ScreenshotAction::from_wire(action.as_str()).unwrap(),
+                action
+            );
+        }
+        assert!(ScreenshotAction::from_wire("").is_err());
+        assert!(ScreenshotAction::from_wire("save").is_err());
+    }
 
     #[test]
     fn filename_uses_timestamp_with_default_or_custom_prefix() {

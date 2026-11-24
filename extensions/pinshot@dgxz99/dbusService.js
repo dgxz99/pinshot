@@ -51,6 +51,12 @@ const FRONTEND_IFACE_XML = `
       <arg type="h" direction="in" name="output_fd"/>
       <arg type="d" direction="out" name="scale"/>
     </method>
+    <method name="SelectScreenshot">
+      <arg type="h" direction="in" name="output_fd"/>
+      <arg type="s" direction="in" name="default_action"/>
+      <arg type="d" direction="out" name="scale"/>
+      <arg type="s" direction="out" name="action"/>
+    </method>
     <method name="SelectLongshot">
       <arg type="i" direction="in" name="monitor_x"/>
       <arg type="i" direction="in" name="monitor_y"/>
@@ -191,6 +197,14 @@ export class PinshotDbusService {
     }
 
     async CaptureScreenshotAsync([handle], invocation) {
+        await this._captureScreenshot(handle, null, invocation);
+    }
+
+    async SelectScreenshotAsync([handle, defaultAction], invocation) {
+        await this._captureScreenshot(handle, defaultAction, invocation);
+    }
+
+    async _captureScreenshot(handle, defaultAction, invocation) {
         try {
             if (this._longshot.active) {
                 throw new Error('请先完成或取消长截图');
@@ -200,13 +214,15 @@ export class PinshotDbusService {
                 throw new Error('截图请求缺少有效的输出文件描述符');
             }
             const stream = GioUnix.OutputStream.new(fds.get(handle), true);
-            let scale;
+            let result;
             try {
-                scale = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection());
+                result = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection(),
+                    defaultAction);
             } finally {
                 stream.close(null);
             }
-            invocation.return_value(new GLib.Variant('(d)', [scale]));
+            const reply = defaultAction === null ? new GLib.Variant('(d)', [result[0]]) : new GLib.Variant('(ds)', result);
+            invocation.return_value(reply);
         } catch (error) {
             invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.CaptureFailed`, error.message);
         }

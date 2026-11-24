@@ -31,8 +31,8 @@ export default class PinshotExtension extends Extension {
             'pinshot-unghost-all': () => this._pinManager.unghostAll(),
         };
         this._registeredShortcuts = [];
-        for (const {key, command} of SHORTCUT_ACTIONS) {
-            const handler = handlers[key] ?? (() => firePinshot([command]));
+        for (const {key, command, args = []} of SHORTCUT_ACTIONS) {
+            const handler = handlers[key] ?? (() => firePinshot([command, ...args]));
             const action = Main.wm.addKeybinding(key, settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
                 Shell.ActionMode.NORMAL, handler);
             if (action !== Meta.KeyBindingAction.NONE) {

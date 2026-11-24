@@ -20,15 +20,23 @@ use ashpd::desktop::screencast::{
     CursorMode, OpenPipeWireRemoteOptions, Screencast, SelectSourcesOptions, SourceType,
     StartCastOptions,
 };
-use ashpd::desktop::{CreateSessionOptions, ResponseError, Session};
+use ashpd::desktop::{CreateSessionOptions, PersistMode, ResponseError, Session};
 use ashpd::enumflags2::BitFlags;
 use futures_util::StreamExt;
 use image::RgbaImage;
 use tokio::signal::unix::{SignalKind, signal};
 
-use crate::{PinshotError, Result};
+use crate::{PinStore, PinshotError, Result};
 
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+const DESKTOP_CAPTURE_NAME: &str = "io.github.dgxz99.Pinshot.Longshot";
+const PERSISTENCE_VERSION: u32 = 4;
+
+#[derive(Clone, Copy)]
+enum ScreenSelection {
+    Remembered,
+    Choose,
+}
 
 /// 单屏采帧探测结果：视频像素尺寸与 Portal 提供的逻辑显示区域
 #[derive(Debug)]
@@ -87,7 +95,7 @@ pub fn probe(frame_count: NonZeroU32) -> Result<Option<ProbeReport>> {
 }
 
 fn run_capture<T>(
-    reservation: Option<&str>,
+    desktop_selection: Option<ScreenSelection>,
     capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
 ) -> Result<Option<T>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -112,16 +120,20 @@ fn run_capture<T>(
             .await
             .map_err(|error| failure("连接会话 D-Bus", error))?;
         // 在打开授权对话框前占用录制名，避免再次触发时把选择器叠进当前录制
-        if let Some(name) = reservation {
+        let store = if desktop_selection.is_some() {
             match connection
-                .request_name_with_flags(name, zbus::fdo::RequestNameFlags::DoNotQueue.into())
+                .request_name_with_flags(DESKTOP_CAPTURE_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())
                 .await
             {
                 Ok(_) => {}
                 Err(zbus::Error::NameTaken) => return Ok(None),
                 Err(error) => return Err(failure("预留长截图会话", error)),
             }
-        }
+            Some(PinStore::open_default()?)
+        } else {
+            None
+        };
+        let permission = desktop_selection.zip(store.as_ref());
         let start = async {
             let portal = Screencast::with_connection(connection.clone())
                 .await
@@ -139,7 +151,7 @@ fn run_capture<T>(
             Some(Ok((portal, session))) => {
                 let result = tokio::select! {
                     _ = &mut stop_requested => Ok(None),
-                    result = capture_session(&connection, &portal, &session, capture) => result,
+                    result = capture_session(&connection, &portal, &session, permission, capture) => result,
                 };
                 close_session(&session).await;
                 result
@@ -158,6 +170,7 @@ async fn capture_session<T>(
     connection: &zbus::Connection,
     portal: &Screencast,
     session: &Session<Screencast>,
+    permission: Option<(ScreenSelection, &PinStore)>,
     capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
 ) -> Result<Option<T>> {
     let closed = session
@@ -165,10 +178,17 @@ async fn capture_session<T>(
         .await
         .map_err(|error| failure("监听屏幕共享状态", error))?;
     tokio::pin!(closed);
-    let options = SelectSourcesOptions::default()
+    let mut options = SelectSourcesOptions::default()
         .set_sources(BitFlags::from_flag(SourceType::Monitor))
         .set_multiple(false)
         .set_cursor_mode(CursorMode::Hidden);
+    let permission = permission.filter(|_| portal.version() >= PERSISTENCE_VERSION);
+    if let Some((selection, store)) = permission {
+        let token = take_restore_token(selection, store)?;
+        options = options
+            .set_persist_mode(PersistMode::ExplicitlyRevoked)
+            .set_restore_token(token.as_deref());
+    }
     let selection = portal
         .select_sources(session, options)
         .await
@@ -186,6 +206,9 @@ async fn capture_session<T>(
     let [source] = streams.streams() else {
         return Err(failure("启动屏幕共享", "系统没有返回单个显示器的视频流"));
     };
+    if let Some((_, store)) = permission {
+        update_restore_token(store, streams.restore_token())?;
+    }
     let remote = portal
         .open_pipe_wire_remote(session, OpenPipeWireRemoteOptions::default())
         .await
@@ -208,6 +231,29 @@ async fn capture_session<T>(
             }
         }
         result = capture(connection, screen) => result,
+    }
+}
+
+/// 令牌只交给 Portal 使用一次；主动选屏不消耗旧令牌，取消选屏时仍可恢复旧屏
+fn take_restore_token(selection: ScreenSelection, store: &PinStore) -> Result<Option<String>> {
+    match selection {
+        ScreenSelection::Choose => Ok(None),
+        ScreenSelection::Remembered => {
+            let token = store.load_screencast_token()?;
+            if token.is_some() {
+                store.clear_screencast_token()?;
+            }
+            Ok(token)
+        }
+    }
+}
+
+/// 只有 Portal 在成功授权时返回令牌才写入；新屏未授权记住时，不回退到旧屏
+fn update_restore_token(store: &PinStore, token: Option<&str>) -> Result<()> {
+    if let Some(token) = token {
+        store.save_screencast_token(token)
+    } else {
+        store.clear_screencast_token()
     }
 }
 
@@ -250,6 +296,42 @@ fn failure(step: &str, error: impl std::fmt::Display) -> PinshotError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn consumes_a_cached_token_once_and_saves_the_next_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PinStore::open_at(dir.path().to_path_buf()).unwrap();
+        update_restore_token(&store, Some("first")).unwrap();
+        assert_eq!(
+            take_restore_token(ScreenSelection::Remembered, &store)
+                .unwrap()
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(store.load_screencast_token().unwrap(), None);
+        update_restore_token(&store, Some("next")).unwrap();
+        assert_eq!(
+            store.load_screencast_token().unwrap().as_deref(),
+            Some("next")
+        );
+    }
+
+    #[test]
+    fn choosing_a_screen_keeps_the_old_token_until_start_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PinStore::open_at(dir.path().to_path_buf()).unwrap();
+        update_restore_token(&store, Some("old")).unwrap();
+        assert_eq!(
+            take_restore_token(ScreenSelection::Choose, &store).unwrap(),
+            None
+        );
+        assert_eq!(
+            store.load_screencast_token().unwrap().as_deref(),
+            Some("old")
+        );
+        update_restore_token(&store, None).unwrap();
+        assert_eq!(store.load_screencast_token().unwrap(), None);
+    }
 
     #[test]
     fn distinguishes_portal_cancellation_from_failure() {

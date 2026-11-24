@@ -276,7 +276,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 - 拼接先在已拼接尾部搜索最匹配的位置，再用 RGB 采样复核。静止、已包含的回滚和位置不明确的帧不追加；只有确认重叠才追加底部新行。默认画布上限为 24,000 像素高和 192 MiB RGBA，以先到者为准。
 
 **桌面流程（`pinshot longshot`）**：
-1. 先通过 GNOME Portal 授权一块显示器；根据 Portal 返回的逻辑矩形定位显示器，在该屏幕内框选正文。框选时短时抓取输入，完成后立即释放；框选和录制期间隐藏既有贴图。
+1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。根据 Portal 返回的逻辑矩形在该屏幕内框选正文；短时抓取输入，框选完立即释放，框选和录制期间隐藏既有贴图。
 2. 选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
 3. 先停止取帧与 Portal 会话，再结束持有 UI 的 D-Bus 连接，由扩展恢复旧贴图。确认完成后复用 Pinshot 的缓存、剪贴板、贴图和截图导出设置。
 

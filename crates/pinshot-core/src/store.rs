@@ -401,10 +401,11 @@ impl PinStore {
     /// 读取持久化的 ScreenCast restore_token
     pub fn load_screencast_token(&self) -> Result<Option<String>> {
         let path = self.screencast_token_path();
-        if !path.exists() {
-            return Ok(None);
-        }
-        let raw = fs::read_to_string(&path).map_err(|e| PinshotError::io(&path, e))?;
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(PinshotError::io(&path, error)),
+        };
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             Ok(None)
@@ -413,20 +414,26 @@ impl PinStore {
         }
     }
 
-    /// 以 `0600` 权限持久化 ScreenCast restore_token
+    /// 以 `0600` 权限原子替换 ScreenCast restore_token
     pub fn save_screencast_token(&self, token: &str) -> Result<()> {
-        self.ensure_layout()?;
         let path = self.screencast_token_path();
-        write_file_private(&path, token.trim().as_bytes())
+        let mut file = tempfile::NamedTempFile::new_in(&self.root_dir)
+            .map_err(|error| PinshotError::io(&path, error))?;
+        file.write_all(token.trim().as_bytes())
+            .map_err(|error| PinshotError::io(&path, error))?;
+        file.persist(&path)
+            .map_err(|error| PinshotError::io(&path, error.error))?;
+        Ok(())
     }
 
-    /// 清除失效的 ScreenCast restore_token
+    /// 清除已提交给 Portal 或失效的 ScreenCast restore_token
     pub fn clear_screencast_token(&self) -> Result<()> {
         let path = self.screencast_token_path();
-        if path.exists() {
-            fs::remove_file(&path).map_err(|e| PinshotError::io(&path, e))?;
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(PinshotError::io(&path, error)),
         }
-        Ok(())
     }
 
     fn load_index(&self) -> Result<StoreIndex> {

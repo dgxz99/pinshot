@@ -34,7 +34,11 @@ enum Commands {
     CaptureEdit,
     /// 框选后滚动，完成时拼接、复制并贴图
     #[cfg(feature = "longshot")]
-    Longshot,
+    Longshot {
+        /// 本次不使用记住的屏幕，重新打开系统选择器
+        #[arg(long)]
+        choose_screen: bool,
+    },
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
     /// 一键切换全部贴图的隐藏/显示状态
@@ -104,7 +108,7 @@ fn main() -> Result<()> {
         Commands::CapturePin => cmd_capture_pin(),
         Commands::CaptureEdit => cmd_capture_edit(),
         #[cfg(feature = "longshot")]
-        Commands::Longshot => cmd_longshot().inspect_err(|error| {
+        Commands::Longshot { choose_screen } => cmd_longshot(choose_screen).inspect_err(|error| {
             notify::warn("Pinshot 长截图", &format!("{error:#}"));
         }),
         Commands::PinClipboard => cmd_pin_clipboard(),
@@ -189,11 +193,11 @@ fn cmd_capture_edit() -> Result<()> {
 }
 
 #[cfg(feature = "longshot")]
-fn cmd_longshot() -> Result<()> {
+fn cmd_longshot(choose_screen: bool) -> Result<()> {
     let cfg = Config::load_or_init()?;
     let frontend = FrontendClient::connect()?;
     let output = frontend.screenshot_settings()?;
-    let Some(recording) = pinshot_core::longshot::record_desktop()? else {
+    let Some(recording) = pinshot_core::longshot::record_desktop(choose_screen)? else {
         return Ok(());
     };
     let source_scale = recording.source_scale;

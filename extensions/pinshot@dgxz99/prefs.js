@@ -166,7 +166,13 @@ export default class PinshotPreferences extends ExtensionPreferences {
         });
 
         const edit = new Gtk.Button({label: '更改', valign: Gtk.Align.CENTER});
-        edit.connect('clicked', () => this._recordShortcut(window, settings, action, local, findConflict));
+        edit.connect('clicked', () => {
+            if (local) {
+                this._chooseSelectionShortcut(window, settings, action);
+            } else {
+                this._recordShortcut(window, settings, action);
+            }
+        });
         const clear = new Gtk.Button({label: '禁用', valign: Gtk.Align.CENTER});
         clear.connect('clicked', () => settings.set_strv(action.key, []));
         const reset = new Gtk.Button({label: '恢复默认', valign: Gtk.Align.CENTER});
@@ -189,10 +195,47 @@ export default class PinshotPreferences extends ExtensionPreferences {
         return row;
     }
 
-    _recordShortcut(window, settings, action, local, findConflict) {
-        const localKeys = '可用 A–Z 或 F1–F12，可搭配 Ctrl、Shift。Enter 保留给确认，按 Esc 取消。';
-        const hint = local ? localKeys : '按下组合键或功能键，按 Esc 取消。';
+    _chooseSelectionShortcut(window, settings, action) {
+        const hint = '选择按键和修饰键，无需按下可能已被桌面绑定的组合键。';
         const dialog = new Adw.AlertDialog({heading: action.title, body: hint});
+        dialog.add_response('cancel', '取消');
+        dialog.set_close_response('cancel');
+
+        const current = parseSelectionShortcut(settings.get_strv(action.key)[0] ?? '');
+        const keys = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...Array.from({length: 12}, (_, i) => `F${i + 1}`)];
+        const key = Gtk.DropDown.new_from_strings(keys);
+        key.set_selected(Math.max(0, keys.indexOf(current?.key.toUpperCase())));
+        const control = new Gtk.CheckButton({label: 'Ctrl', active: current?.control ?? false});
+        const shift = new Gtk.CheckButton({label: 'Shift', active: current?.shift ?? false});
+        const modifiers = new Gtk.Box({spacing: 12, halign: Gtk.Align.CENTER});
+        modifiers.append(control);
+        modifiers.append(shift);
+        const save = new Gtk.Button({label: '应用快捷键', css_classes: ['suggested-action']});
+        save.connect('clicked', () => {
+            const keyName = keys[key.get_selected()];
+            const accelerator = `${control.active ? '<Control>' : ''}${shift.active ? '<Shift>' : ''}` +
+                (keyName.length === 1 ? keyName.toLowerCase() : keyName);
+            const conflict = findSelectionConflict(settings, action, accelerator);
+            if (conflict) {
+                dialog.set_body(`此快捷键已被框选内的「${conflict}」使用，请另选一组。`);
+                return;
+            }
+            if (!settings.set_strv(action.key, [accelerator])) {
+                dialog.set_body('无法写入快捷键设置。');
+                return;
+            }
+            dialog.close();
+        });
+        const options = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12});
+        options.append(key);
+        options.append(modifiers);
+        options.append(save);
+        dialog.set_extra_child(options);
+        dialog.present(window);
+    }
+
+    _recordShortcut(window, settings, action) {
+        const dialog = new Adw.AlertDialog({heading: action.title, body: '按下组合键或功能键，按 Esc 取消。'});
         dialog.add_response('cancel', '取消');
         dialog.set_close_response('cancel');
         const controller = new Gtk.EventControllerKey({propagation_phase: Gtk.PropagationPhase.CAPTURE});
@@ -202,20 +245,13 @@ export default class PinshotPreferences extends ExtensionPreferences {
                 dialog.close();
                 return true;
             }
-            const accelerator = Gtk.accelerator_name(Gdk.keyval_to_lower(key), modifiers);
-            if (local) {
-                if (!parseSelectionShortcut(accelerator)) {
-                    dialog.set_body(localKeys);
-                    return true;
-                }
-            } else {
-                const functionKey = key >= Gdk.KEY_F1 && key <= Gdk.KEY_F35;
-                if ((!(modifiers & GLOBAL_MODIFIERS) && !functionKey) || !Gtk.accelerator_valid(key, modifiers)) {
-                    dialog.set_body('请使用带 Ctrl、Alt 或 Super 等修饰键的组合键，或单独使用功能键。');
-                    return true;
-                }
+            const functionKey = key >= Gdk.KEY_F1 && key <= Gdk.KEY_F35;
+            if ((!(modifiers & GLOBAL_MODIFIERS) && !functionKey) || !Gtk.accelerator_valid(key, modifiers)) {
+                dialog.set_body('请使用带 Ctrl、Alt 或 Super 等修饰键的组合键，或单独使用功能键。');
+                return true;
             }
-            const conflict = findConflict(settings, action, accelerator);
+            const accelerator = Gtk.accelerator_name(Gdk.keyval_to_lower(key), modifiers);
+            const conflict = findGlobalConflict(settings, action, accelerator);
             if (conflict) {
                 dialog.set_body(`此快捷键已被「${conflict}」使用，请另选一组。`);
                 return true;

@@ -105,6 +105,7 @@
 | `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 冻结画面后可调整选区；确认时写入 PNG，并返回纹理倍率和用户选定的 `copy`、`pin` 或 `edit`；取消返回 `0` 与空字符串 |
 | `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
+| `GetClipboardImageScale()` | 无 | `d` | 外部图片未携带原始倍率时：默认返回 `1.0`；启用屏幕像素 1:1 时返回指针所在显示器的倍率 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
 
@@ -231,6 +232,7 @@ padding_px = 16
   3. `text/uri-list` → 解析 `file://` URI，若是本地存在的常见图片文件（`.png`/`.jpg`/`.jpeg`/`.webp`/`.bmp`），直接复制/转码进缓存贴出；
   4. `text/plain;charset=utf-8` / `text/plain` → 走文字卡片渲染流程；
   5. 空剪贴板或不支持类型 → 发送轻量桌面通知提示后退出。
+- Pinshot 复制 PNG 时用私有辅助块 `psCL` 记录原始倍率，不重采样。再次贴图时优先使用该倍率；外部图默认仍按逻辑像素显示。
 - **文字转图片细节**：
   - **原文留存**：将原始文本完整存入 `texts/<id>.txt`，前端根据 `has_text = true` 在右键菜单显示「复制原始文本」。
   - **代码特征自动识别**：基于缩进比例（多行以 2/4 空格或 Tab 开头）、代码符号密度（`{}`、`();`、`=>`、`::`、`import`/`fn`/`def`/`const`）判断是否切换 `code_font`（等宽字体、保留空格缩进）；普通文本使用 `prose_font`。

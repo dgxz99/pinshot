@@ -7,18 +7,49 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const HUD_SPACE = 68;
 const MIN_EDGE = 32;
+const OUTLINE_WIDTH = 2;
+// 裁剪边界会在像素空间向外取整，边框与选区之间留空避免分数缩放时串色
+const OUTLINE_GAP = 2;
+const OUTLINE_MARGIN = OUTLINE_WIDTH + OUTLINE_GAP;
 const CANCELLED = [0, 0, 0, 0];
+
+/** 录制边框只在采集范围外绘制，前景和四条边都不参与输入拾取 */
+function showRecordingOutline(monitor, rect) {
+    const [x, y, width, height] = rect;
+    const left = x - OUTLINE_MARGIN;
+    const top = y - OUTLINE_MARGIN;
+    const outerWidth = width + 2 * OUTLINE_MARGIN;
+    const outerHeight = height + 2 * OUTLINE_MARGIN;
+    const outline = new St.Widget({name: 'pinshot-longshot-recording-outline',
+        x: monitor.x, y: monitor.y, width: monitor.width, height: monitor.height,
+        reactive: false, clip_to_allocation: true});
+    const strips = [
+        [left, top, outerWidth, OUTLINE_WIDTH],
+        [left, top + outerHeight - OUTLINE_WIDTH, outerWidth, OUTLINE_WIDTH],
+        [left, top + OUTLINE_WIDTH, OUTLINE_WIDTH, outerHeight - 2 * OUTLINE_WIDTH],
+        [left + outerWidth - OUTLINE_WIDTH, top + OUTLINE_WIDTH,
+            OUTLINE_WIDTH, outerHeight - 2 * OUTLINE_WIDTH],
+    ];
+    for (const [sx, sy, sw, sh] of strips) {
+        outline.add_child(new St.Widget({x: sx, y: sy, width: sw, height: sh,
+            style_class: 'pinshot-longshot-recording-edge', reactive: false}));
+    }
+    Main.layoutManager.uiGroup.add_child(outline);
+    return outline;
+}
 
 /** 只在用户明确框选时抓取输入，框选完立即归还应用焦点 */
 class RegionSelector {
     constructor(monitor, workArea) {
         this._monitor = monitor;
         this._workArea = workArea;
+        const left = workArea.x - monitor.x;
+        const top = workArea.y - monitor.y;
         this._bounds = {
-            left: workArea.x - monitor.x,
-            top: workArea.y - monitor.y,
-            right: workArea.x - monitor.x + workArea.width,
-            bottom: workArea.y - monitor.y + workArea.height - HUD_SPACE,
+            left: left + OUTLINE_MARGIN,
+            top: top + OUTLINE_MARGIN,
+            right: left + workArea.width - OUTLINE_MARGIN,
+            bottom: top + workArea.height - HUD_SPACE,
         };
         this._origin = null;
         this._grab = null;
@@ -185,7 +216,7 @@ export class LongshotController {
             throw new Error('显示器布局已变化，无法定位共享屏幕，请重新开始');
         }
         const workArea = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
-        if (workArea.height < HUD_SPACE + MIN_EDGE || workArea.width < 280) {
+        if (workArea.height < HUD_SPACE + MIN_EDGE + OUTLINE_MARGIN || workArea.width < 280) {
             throw new Error('共享显示器的可用区域太小');
         }
         const session = {owner, workArea, selector: new RegionSelector(monitor, workArea)};
@@ -206,6 +237,10 @@ export class LongshotController {
                 return CANCELLED;
             }
             session.selector = null;
+            session.outline = showRecordingOutline(monitor, rect);
+            session.outline.connect('destroy', () => {
+                session.outline = null;
+            });
             this._showHud(session);
             return rect;
         } catch (error) {
@@ -288,6 +323,7 @@ export class LongshotController {
         }
         this._session = null;
         session.selector?.close();
+        session.outline?.destroy();
         session.hud?.destroy();
         if (session.watch) {
             Gio.bus_unwatch_name(session.watch);

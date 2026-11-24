@@ -107,7 +107,7 @@
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
 
-信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `finish` 或 `cancel`。前端监听该连接消失，用于收回选择器、控制条并恢复贴图。
+信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `finish` 或 `cancel`。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
 
 ### 3.2 Core 提供给前端的内部子命令（`pinshot internal ...`）
 前端通过短命子命令将图像处理、保存和历史写入交给 Core：
@@ -277,7 +277,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 
 **桌面流程（`pinshot longshot`）**：
 1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。根据 Portal 返回的逻辑矩形在该屏幕内框选正文；短时抓取输入，框选完立即释放，框选和录制期间隐藏既有贴图。
-2. 选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
+2. 录制时在固定选区外绘制不接收输入的边框，给向外取整的像素裁剪留出间隙。选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
 3. 先停止取帧与 Portal 会话，再结束持有 UI 的 D-Bus 连接，由扩展恢复旧贴图。确认完成后复用 Pinshot 的缓存、剪贴板、贴图和截图导出设置。
 
 ---

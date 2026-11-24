@@ -29,6 +29,10 @@
     border: 2px solid #78aeed;
 }
 
+.pinshot-longshot-recording-edge {
+    background-color: #78aeed;
+}
+
 .pinshot-longshot-hint,
 .pinshot-longshot-hud {
     color: white;

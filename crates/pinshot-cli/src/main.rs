@@ -176,6 +176,9 @@ fn cmd_capture_pin() -> Result<()> {
     )?;
 
     push_pin_to_frontend(&store, &record)?;
+    if let Err(error) = clipboard::copy_png_file(&record.image_path) {
+        notify::warn("Pinshot", &format!("截图已贴出，但复制失败：{error}"));
+    }
     finish_screenshot(&cfg, &output, &captured.png_bytes, "已截图并贴图")
 }
 

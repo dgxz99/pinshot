@@ -49,9 +49,9 @@ gnome-extensions enable pinshot@dgxz99
 | 显示或隐藏全部贴图 | 未绑定 | `pinshot toggle-hide` |
 | 恢复最近关闭的一张贴图 | 未绑定 | `pinshot restore-last` |
 
-- **截图贴图**：触发后会打开 GNOME 原生截图界面。选好区域并确认，图片会贴到桌面，也可以从剪贴板粘贴。
+- **截图贴图**：触发后在冻结的桌面画面上直接拖拽。松开鼠标就会复制并贴出选区，按 `Esc` 或右键可取消。不弹共享授权；窗口或整屏截图仍可用 GNOME 自带的 `Print`。
 - **剪贴板贴图**：先在原应用用 `Ctrl+C` 复制文字或图片，再触发贴图。例如复制一段代码，就能把它贴在编辑器旁边。Pinshot 不会接管其他应用的复制快捷键。
-- **截图后标注**：运行 `pinshot capture-edit`，确认截图后在 Satty 里编辑。按 `Enter` 保存并复制标注结果；`Esc` 退出标注。已有贴图则用右键菜单里的「标注编辑 (satty)」，保存后会更新那张贴图。
+- **截图后标注**：运行 `pinshot capture-edit`，拖拽框选后直接进入 Satty。按 `Enter` 保存并复制标注结果；`Esc` 退出且不改变剪贴板。已有贴图则用右键菜单里的「标注编辑 (satty)」，保存后会更新那张贴图。
 
 `Super` 通常是键盘上的 Windows 键。到 **GNOME「扩展」→ Pinshot → 齿轮 →「快捷键」**，可以更改、禁用或恢复默认绑定。也可用 `gnome-extensions prefs pinshot@dgxz99` 打开该面板。若已在 GNOME 系统设置中为同一个命令绑了键，可以继续用原来的绑定，不必再为同一动作配置扩展快捷键。
 

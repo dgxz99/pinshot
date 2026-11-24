@@ -1,9 +1,10 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import Pango from 'gi://Pango';
-import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+import {CANCELLED_REGION, RegionSelector} from './regionSelector.js';
 
 const HUD_SPACE = 68;
 const MIN_EDGE = 32;
@@ -11,7 +12,6 @@ const OUTLINE_WIDTH = 2;
 // 裁剪边界会在像素空间向外取整，边框与选区之间留空避免分数缩放时串色
 const OUTLINE_GAP = 2;
 const OUTLINE_MARGIN = OUTLINE_WIDTH + OUTLINE_GAP;
-const CANCELLED = [0, 0, 0, 0];
 
 /** 录制边框只在采集范围外绘制，前景和四条边都不参与输入拾取 */
 function showRecordingOutline(monitor, rect) {
@@ -38,158 +38,6 @@ function showRecordingOutline(monitor, rect) {
     return outline;
 }
 
-/** 只在用户明确框选时抓取输入，框选完立即归还应用焦点 */
-class RegionSelector {
-    constructor(monitor, workArea) {
-        this._monitor = monitor;
-        this._workArea = workArea;
-        const left = workArea.x - monitor.x;
-        const top = workArea.y - monitor.y;
-        this._bounds = {
-            left: left + OUTLINE_MARGIN,
-            top: top + OUTLINE_MARGIN,
-            right: left + workArea.width - OUTLINE_MARGIN,
-            bottom: top + workArea.height - HUD_SPACE,
-        };
-        this._origin = null;
-        this._grab = null;
-    }
-
-    select() {
-        const {x, y, width, height} = this._monitor;
-        this._layer = new St.Widget({
-            name: 'pinshot-longshot-selector', reactive: true, can_focus: true,
-            x, y, width, height, clip_to_allocation: true,
-        });
-        this._shades = Array.from({length: 4}, () => new St.Widget({style_class: 'pinshot-longshot-shade'}));
-        this._outline = new St.Widget({style_class: 'pinshot-longshot-outline'});
-        for (const actor of [...this._shades, this._outline]) {
-            this._layer.add_child(actor);
-        }
-        this._outline.hide();
-        this._shades[0].set_size(width, height);
-        for (const shade of this._shades.slice(1)) {
-            shade.hide();
-        }
-        this._hint = new St.Label({
-            style_class: 'pinshot-longshot-hint', text: '拖动框选滚动内容 · Esc 取消',
-        });
-        this._hint.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        this._hint.set_position(this._bounds.left + 12, this._bounds.bottom + 10);
-        this._hint.set_width(this._workArea.width - 24);
-        this._layer.add_child(this._hint);
-        Main.layoutManager.uiGroup.add_child(this._layer);
-        this._grab = Main.pushModal(this._layer, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
-        if (this._grab.is_revoked()) {
-            this.close();
-            throw new Error('无法进入长截图框选，请先关闭其他 GNOME 弹层');
-        }
-        this._revokedId = this._grab.connect('notify::revoked', () => {
-            if (this._grab?.is_revoked()) {
-                this.close();
-            }
-        });
-        this._layer.connect('captured-event', (_actor, event) => this._onEvent(event));
-        this._layer.connect('destroy', () => {
-            // Shell 在关闭时可能先销毁场景节点；Main 会随节点自动释放 modal grab
-            this._layer = null;
-            this._clearGrabHandler();
-            this._grab = null;
-            this._resolveSelection(CANCELLED);
-        });
-        return new Promise(resolve => {
-            this._resolve = resolve;
-        });
-    }
-
-    _onEvent(event) {
-        const type = event.type();
-        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
-            this.close();
-        } else if (type === Clutter.EventType.BUTTON_PRESS) {
-            if (event.get_button() === Clutter.BUTTON_PRIMARY) {
-                this._origin = this._pointAt(event, false);
-                if (this._origin) {
-                    this._draw(this._origin);
-                }
-            } else if (event.get_button() === Clutter.BUTTON_SECONDARY) {
-                this.close();
-            }
-        } else if (this._origin && type === Clutter.EventType.MOTION) {
-            this._draw(this._pointAt(event, true));
-        } else if (this._origin && type === Clutter.EventType.BUTTON_RELEASE &&
-            event.get_button() === Clutter.BUTTON_PRIMARY) {
-            const rect = this._rectAt(this._pointAt(event, true));
-            if (rect[2] >= MIN_EDGE && rect[3] >= MIN_EDGE) {
-                this.close(rect);
-            } else {
-                this._draw(this._origin);
-                this._origin = null;
-                this._hint.text = '区域太小，请重新拖动 · Esc 取消';
-            }
-        }
-        return Clutter.EVENT_STOP;
-    }
-
-    _pointAt(event, clamp) {
-        const {left, top, right, bottom} = this._bounds;
-        const [stageX, stageY] = event.get_coords();
-        const x = Math.round(stageX - this._monitor.x);
-        const y = Math.round(stageY - this._monitor.y);
-        if (!clamp && (x < left || x >= right || y < top || y >= bottom)) {
-            return null;
-        }
-        return [Math.min(Math.max(left, x), right), Math.min(Math.max(top, y), bottom)];
-    }
-
-    _rectAt(point) {
-        const [x, y] = this._origin;
-        return [Math.min(x, point[0]), Math.min(y, point[1]),
-            Math.abs(point[0] - x), Math.abs(point[1] - y)];
-    }
-
-    _draw(point) {
-        const [x, y, width, height] = this._rectAt(point);
-        const right = x + width;
-        const bottom = y + height;
-        const areas = [
-            [0, 0, this._monitor.width, y],
-            [0, y, x, height],
-            [right, y, this._monitor.width - right, height],
-            [0, bottom, this._monitor.width, this._monitor.height - bottom],
-        ];
-        for (const [index, [sx, sy, sw, sh]] of areas.entries()) {
-            this._shades[index].set_position(sx, sy);
-            this._shades[index].set_size(sw, sh);
-            this._shades[index].show();
-        }
-        this._outline.set_position(x, y);
-        this._outline.set_size(width, height);
-        this._outline.visible = width > 0 && height > 0;
-    }
-
-    close(rect = CANCELLED) {
-        this._clearGrabHandler();
-        this._resolveSelection(rect);
-        this._layer?.destroy();
-        this._layer = null;
-        this._grab = null;
-    }
-
-    _clearGrabHandler() {
-        if (this._revokedId) {
-            this._grab.disconnect(this._revokedId);
-            this._revokedId = 0;
-        }
-    }
-
-    _resolveSelection(rect) {
-        const resolve = this._resolve;
-        this._resolve = null;
-        resolve?.(rect);
-    }
-}
-
 /** 长图 UI 由发起录制的 D-Bus 连接持有；进程退出时自动恢复贴图 */
 export class LongshotController {
     constructor(pinManager, emitAction) {
@@ -207,7 +55,7 @@ export class LongshotController {
             throw new Error('已有长截图正在运行');
         }
         if (Main.sessionMode.isLocked) {
-            return CANCELLED;
+            return CANCELLED_REGION;
         }
         const [x, y, width, height] = geometry;
         const monitor = Main.layoutManager.monitors.find(candidate =>
@@ -219,7 +67,18 @@ export class LongshotController {
         if (workArea.height < HUD_SPACE + MIN_EDGE + OUTLINE_MARGIN || workArea.width < 280) {
             throw new Error('共享显示器的可用区域太小');
         }
-        const session = {owner, workArea, selector: new RegionSelector(monitor, workArea)};
+        const left = workArea.x - monitor.x;
+        const top = workArea.y - monitor.y;
+        const bottom = top + workArea.height - HUD_SPACE;
+        const selector = new RegionSelector(monitor, {
+            name: 'pinshot-longshot-selector',
+            bounds: {left: left + OUTLINE_MARGIN, top: top + OUTLINE_MARGIN,
+                right: left + workArea.width - OUTLINE_MARGIN, bottom},
+            minEdge: MIN_EDGE,
+            hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24,
+                text: '拖动框选滚动内容 · Esc 取消'},
+        });
+        const session = {owner, workArea, selector};
         this._session = session;
         try {
             this._pinManager.setSystemHidden(true);
@@ -234,7 +93,7 @@ export class LongshotController {
             const rect = await session.selector.select();
             if (this._session !== session || rect[2] === 0) {
                 this._close(session);
-                return CANCELLED;
+                return CANCELLED_REGION;
             }
             session.selector = null;
             session.outline = showRecordingOutline(monitor, rect);

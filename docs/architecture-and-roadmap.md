@@ -102,7 +102,7 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
-| `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 显示原生截图界面，把用户确认后的 PNG 写入调用方的临时文件 |
+| `CaptureScreenshot(output_fd)` | `h`（Unix 文件描述符） | `d`（纹理缩放倍率；`0` 表示取消） | 冻结桌面并直接框选，把鼠标松开时的选区 PNG 写入调用方的临时文件 |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
@@ -163,7 +163,7 @@ pinshot/
 │       ├── pinActor.js                # 单贴图非窗口渲染、缩放、迷你态、防泄漏销毁
 │       ├── contextMenu.js             # 贴图右键菜单
 │       ├── screenshot.js              # 复用 GNOME 原生截图界面，分离截图输出
-│       ├── regionSelector.js          # 长图纯滚动区域透明框选遮罩
+│       ├── regionSelector.js         # 普通截图与滚动长图共用的框选遮罩
 │       └── longshotHud.js             # 长图悬浮控制条（高度展示、快滚告警、完成/取消）
 └── scripts/
     ├── install.sh                     # 构建并安装到 ~/.local/bin 与扩展目录
@@ -317,7 +317,7 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 
 **扩展快捷键设置**：可在 GNOME「扩展」应用打开 Pinshot 首选项，或运行 `gnome-extensions prefs pinshot@dgxz99`。默认 `Super+Shift+P` 区域截图并贴图、`Super+Shift+V` 剪贴板贴图、`Super+Shift+U` 解除全部穿透。区域截图后标注、显示／隐藏全部贴图、恢复最近贴图默认未绑定。各项可改绑、禁用或恢复默认，不修改 GNOME 系统里的自定义绑定。贴图局部按键只有在 Shell 将键盘事件交给贴图时才生效，也可用右键菜单完成相应操作。
 
-**截图输出设置**：Pinshot 发起的截图仍使用 GNOME 原生框选、屏幕或窗口截图界面。仅在本次 Pinshot 截图期间，将 PNG 交给 Core 处理，不触发 GNOME 的自动保存和完成通知，也不修改任何 GNOME 设置。原生 `Print` 工作流照常保存和通知。
+**截图输出设置**：Pinshot 发起的普通截图用 Shell 抓取单张冻结画面，与长截图共用拖拽框选。松开鼠标后将选区 PNG 交给 Core，不使用 ScreenCast Portal，也不接管 GNOME 原生截图界面。常规 `Print` 仍提供原有框选、整屏、窗口和录屏入口。
 
 扩展首选项的「截图」页可单独启用自动保存和完成通知，默认都关闭。截图贴图仍写入 Pinshot 历史缓存；勾选自动保存后，额外导出一份 PNG。目录和文件名也用于手动「保存原图」：目录留空沿用 `general.save_dir`（默认 `~/Pictures/Pinshots`），文件名默认为 `pinshot-YYYYMMDD-HHMMSS.png`，以实际保存时的本地时间命名；同一秒重名则追加数字序号，不覆盖旧图。
 

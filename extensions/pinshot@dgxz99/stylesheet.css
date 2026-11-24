@@ -21,11 +21,11 @@
     border: 1px dashed rgba(255, 196, 61, 0.85);
 }
 
-.pinshot-longshot-shade {
+.pinshot-selection-shade {
     background-color: rgba(0, 0, 0, 0.52);
 }
 
-.pinshot-longshot-outline {
+.pinshot-selection-outline {
     border: 2px solid #78aeed;
 }
 
@@ -33,7 +33,7 @@
     background-color: #78aeed;
 }
 
-.pinshot-longshot-hint,
+.pinshot-selection-hint,
 .pinshot-longshot-hud {
     color: white;
     background-color: rgba(27, 27, 33, 0.98);

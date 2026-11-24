@@ -1,10 +1,9 @@
 import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {LongshotController} from './longshot.js';
-import {PinshotScreenshot} from './screenshot.js';
+import {PinshotScreenshot, nativeScreenshotActive} from './screenshot.js';
 
 export const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
 export const FRONTEND_OBJECT_PATH = '/io/github/dgxz99/Pinshot/Frontend';
@@ -113,6 +112,7 @@ export class PinshotDbusService {
             },
             () => {
                 this._longshot.destroy();
+                this._screenshot.destroy();
                 console.warn(`[pinshot] D-Bus 服务名丢失: ${FRONTEND_BUS_NAME}`);
             }
         );
@@ -175,9 +175,8 @@ export class PinshotDbusService {
 
     async SelectLongshotAsync(geometry, invocation) {
         try {
-            const ui = Main.screenshotUI;
-            if (ui.visible || ui._openingCoroutineInProgress || ui.screencast_in_progress) {
-                throw new Error('请先退出 GNOME 截图或录屏界面');
+            if (this._screenshot.active || nativeScreenshotActive()) {
+                throw new Error('请先完成或取消当前截图或录屏');
             }
             const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(), geometry);
             invocation.return_value(new GLib.Variant('(uuuu)', rect));
@@ -203,7 +202,7 @@ export class PinshotDbusService {
             const stream = GioUnix.OutputStream.new(fds.get(handle), true);
             let scale;
             try {
-                scale = await this._screenshot.capture(stream);
+                scale = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection());
             } finally {
                 stream.close(null);
             }

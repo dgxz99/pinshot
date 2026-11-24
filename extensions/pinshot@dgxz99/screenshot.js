@@ -1,131 +1,110 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
-import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-// GNOME Shell 51 的 UIMode.SCREENSHOT_ONLY 未导出，保留原生截图界面但不提供录屏切换
-const SCREENSHOT_ONLY = 2;
+import {RegionSelector} from './regionSelector.js';
+
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-/** 一次性接管 Pinshot 发起的原生截图确认，PNG 直接写入调用方的临时流 */
+/** 避免在系统截图或录屏已经打开时叠加 Pinshot 框选 */
+export function nativeScreenshotActive() {
+    const ui = Main.screenshotUI;
+    return ui.visible || ui._openingCoroutineInProgress || ui.screencast_in_progress;
+}
+
+/** 用单张冻结画面框选并写入调用方的临时流，不接管 GNOME 原生截图 */
 export class PinshotScreenshot {
     constructor() {
         this._session = null;
     }
 
-    async capture(stream) {
-        const ui = Main.screenshotUI;
-        if (this._session || ui.visible || ui._openingCoroutineInProgress || ui.screencast_in_progress) {
-            throw new Error('GNOME 截图界面正忙，请先完成当前操作');
-        }
-
-        return new Promise((resolve, reject) => {
-            const previousSave = Object.getOwnPropertyDescriptor(ui, '_saveScreenshot');
-            const originalSave = ui._saveScreenshot;
-            const session = {ui, cancellable: new Gio.Cancellable(), encoding: null};
-            this._session = session;
-            let closedId;
-            const save = async () => {
-                if (ui._currentMode !== SCREENSHOT_ONLY) {
-                    return originalSave.call(ui);
-                }
-                session.encoding ??= this._writeSelection(ui, stream, session.cancellable)
-                    .then(scale => ({scale}), error => ({error}));
-                await session.encoding;
-            };
-            const finish = async openError => {
-                if (!closedId) {
-                    return;
-                }
-                ui.disconnect(closedId);
-                closedId = 0;
-                if (ui._saveScreenshot === save) {
-                    if (previousSave) {
-                        Object.defineProperty(ui, '_saveScreenshot', previousSave);
-                    } else {
-                        delete ui._saveScreenshot;
-                    }
-                }
-                const result = await session.encoding;
-                this._session = null;
-                if (session.cancellable.is_cancelled()) {
-                    resolve(0);
-                } else if (openError || result?.error) {
-                    reject(openError ?? result.error);
-                } else {
-                    resolve(result?.scale ?? 0);
-                }
-            };
-
-            closedId = ui.connect('closed', () => finish());
-            ui._saveScreenshot = save;
-            ui.open(SCREENSHOT_ONLY).then(() => {
-                if (!ui.visible) {
-                    return finish();
-                }
-                if (session.cancellable.is_cancelled()) {
-                    ui.close();
-                }
-                return undefined;
-            }).catch(finish);
-        });
+    get active() {
+        return this._session !== null;
     }
 
-    /** 沿用 GNOME 51 对选区、屏幕和窗口的纹理／光标坐标换算，不调用系统的保存流程 */
-    async _writeSelection(ui, stream, cancellable) {
-        let content;
-        let scale;
-        let geometry = [0, 0, -1, -1];
-        let cursorTexture;
-        let cursorX;
-        let cursorY;
-        if (ui._selectionButton.checked || ui._screenButton.checked) {
-            content = ui._stageScreenshot.get_content();
-            scale = ui._scale;
-            geometry = ui._getSelectedGeometry(true);
-            cursorTexture = ui._cursor.content?.get_texture();
-            cursorX = ui._cursor.x * scale;
-            cursorY = ui._cursor.y * scale;
-        } else {
-            const window = ui._windowSelectors.flatMap(selector => selector.windows())
-                .find(candidate => candidate.checked);
-            if (!window) {
-                throw new Error('没有选中的窗口');
-            }
-            content = window.windowContent;
-            scale = window.bufferScale;
-            cursorTexture = window.getCursorTexture()?.get_texture();
-            cursorX = window.cursorPoint.x * scale;
-            cursorY = window.cursorPoint.y * scale;
+    async capture(stream, owner, connection) {
+        if (this.active || nativeScreenshotActive()) {
+            throw new Error('请先完成或取消当前截图');
         }
-        if (!content) {
-            throw new Error('GNOME 未返回截图纹理');
+        if (Main.sessionMode.isLocked) {
+            return 0;
         }
+        const session = {selector: null, cancellable: new Gio.Cancellable()};
+        this._session = session;
+        try {
+            session.watch = Gio.bus_watch_name_on_connection(connection, owner, Gio.BusNameWatcherFlags.NONE,
+                null, () => this._cancel(session));
+            session.monitorsChanged = Main.layoutManager.connect('monitors-changed', () => this._cancel(session));
+            session.modeChanged = Main.sessionMode.connect('updated', () => {
+                if (Main.sessionMode.isLocked) {
+                    this._cancel(session);
+                }
+            });
 
+            const [width, height] = global.stage.get_size();
+            const [content, scale] = await new Shell.Screenshot().screenshot_stage_to_content();
+            if (session.cancellable.is_cancelled() || nativeScreenshotActive()) {
+                return 0;
+            }
+            session.selector = new RegionSelector({x: 0, y: 0, width, height}, {
+                name: 'pinshot-screenshot-selector', background: content,
+            });
+            const rect = await session.selector.select();
+            session.selector = null;
+            if (rect[2] === 0 || session.cancellable.is_cancelled()) {
+                return 0;
+            }
+            await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);
+            return session.cancellable.is_cancelled() ? 0 : scale;
+        } catch (error) {
+            if (session.cancellable.is_cancelled()) {
+                return 0;
+            }
+            throw error;
+        } finally {
+            this._cancel(session);
+            if (session.watch) {
+                Gio.bus_unwatch_name(session.watch);
+            }
+            if (session.monitorsChanged) {
+                Main.layoutManager.disconnect(session.monitorsChanged);
+            }
+            if (session.modeChanged) {
+                Main.sessionMode.disconnect(session.modeChanged);
+            }
+            this._session = null;
+        }
+    }
+
+    /** Surface 与 stage 共用原点，裁剪边界向外取整并限制在纹理内 */
+    async _writeSelection(texture, scale, [x, y, width, height], stream, cancellable) {
+        const left = Math.floor(x * scale);
+        const top = Math.floor(y * scale);
+        const right = Math.min(texture.get_width(), Math.ceil((x + width) * scale));
+        const bottom = Math.min(texture.get_height(), Math.ceil((y + height) * scale));
+        if (right <= left || bottom <= top) {
+            throw new Error('截图选区超出冻结画面');
+        }
         const memory = Gio.MemoryOutputStream.new_resizable();
         try {
-            await Shell.Screenshot.composite_to_stream(content.get_texture(), ...geometry, scale,
-                ui._cursor.visible ? cursorTexture ?? null : null, cursorX, cursorY, ui._cursorScale, memory);
+            await Shell.Screenshot.composite_to_stream(texture, left, top, right - left, bottom - top,
+                scale, null, 0, 0, 1, memory);
         } finally {
             memory.close(null);
         }
-        const bytes = memory.steal_as_bytes();
-        const input = Gio.MemoryInputStream.new_from_bytes(bytes);
+        const input = Gio.MemoryInputStream.new_from_bytes(memory.steal_as_bytes());
         await stream.splice_async(input, Gio.OutputStreamSpliceFlags.CLOSE_SOURCE, GLib.PRIORITY_DEFAULT, cancellable);
-        if (!cancellable.is_cancelled()) {
-            St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
-        }
-        return scale;
+    }
+
+    _cancel(session) {
+        session.cancellable.cancel();
+        session.selector?.close();
     }
 
     destroy() {
-        if (!this._session) {
-            return;
-        }
-        this._session.cancellable.cancel();
-        if (this._session.ui.visible) {
-            this._session.ui.close();
+        if (this._session) {
+            this._cancel(this._session);
         }
     }
 }

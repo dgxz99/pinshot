@@ -95,7 +95,7 @@ export class PinshotDbusService {
     constructor(pinManager, settings) {
         this._pinManager = pinManager;
         this._settings = settings;
-        this._screenshot = new PinshotScreenshot();
+        this._screenshot = new PinshotScreenshot(settings);
         this._longshot = new LongshotController(pinManager, (owner, action) => {
             Gio.DBus.session.emit_signal(owner, FRONTEND_OBJECT_PATH, FRONTEND_INTERFACE_NAME,
                 'LongshotAction', new GLib.Variant('(s)', [action]));

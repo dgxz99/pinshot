@@ -141,8 +141,15 @@ export class RegionSelector {
             return;
         }
         const character = String.fromCodePoint(Clutter.keysym_to_unicode(key)).toLowerCase();
-        const action = this._actions.find(({shortcut}) => shortcut && shortcut.key === character &&
-            modifiers === (shortcut.control ? Clutter.ModifierType.CONTROL_MASK : 0));
+        const action = this._actions.find(({shortcut}) => {
+            if (!shortcut) {
+                return false;
+            }
+            const shortcutModifiers = (shortcut.control ? Clutter.ModifierType.CONTROL_MASK : 0) |
+                (shortcut.shift ? Clutter.ModifierType.SHIFT_MASK : 0);
+            return modifiers === shortcutModifiers &&
+                (shortcut.key.length === 1 ? shortcut.key === character : key === Clutter[`KEY_${shortcut.key}`]);
+        });
         if (action) {
             this._confirm(action.id);
         }

@@ -4,14 +4,10 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {RegionSelector} from './regionSelector.js';
+import {parseSelectionShortcut, SELECTION_ACTIONS} from './selectionShortcuts.js';
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-const SCREENSHOT_ACTIONS = [
-    {id: 'copy', label: '复制', shortcut: {key: 'c', label: 'Ctrl+C', control: true}},
-    {id: 'pin', label: '贴图', shortcut: {key: 'p', label: 'P'}},
-    {id: 'edit', label: '编辑', shortcut: {key: 'e', label: 'E'}},
-];
 const LEGACY_ACTIONS = [{id: 'confirm', label: '确认'}];
 const CANCELLED = [0, ''];
 
@@ -23,7 +19,8 @@ export function nativeScreenshotActive() {
 
 /** 用单张冻结画面框选并写入调用方的临时流，不接管 GNOME 原生截图 */
 export class PinshotScreenshot {
-    constructor() {
+    constructor(settings) {
+        this._settings = settings;
         this._session = null;
     }
 
@@ -32,7 +29,9 @@ export class PinshotScreenshot {
     }
 
     async capture(stream, owner, connection, defaultAction) {
-        const actions = defaultAction === null ? LEGACY_ACTIONS : SCREENSHOT_ACTIONS;
+        const actions = defaultAction === null ? LEGACY_ACTIONS : SELECTION_ACTIONS.map(({id, key, label}) => ({
+            id, label, shortcut: parseSelectionShortcut(this._settings.get_strv(key)[0] ?? ''),
+        }));
         const initialAction = defaultAction ?? 'confirm';
         if (!actions.some(({id}) => id === initialAction)) {
             throw new Error('无效的截图默认动作');

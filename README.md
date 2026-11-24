@@ -55,6 +55,8 @@ gnome-extensions enable pinshot@dgxz99
 
 `Super` 通常是键盘上的 Windows 键。到 **GNOME「扩展」→ Pinshot → 齿轮 →「快捷键」**，可以更改、禁用或恢复默认绑定。也可用 `gnome-extensions prefs pinshot@dgxz99` 打开该面板。若已在 GNOME 系统设置中为同一个命令绑了键，可以继续用原来的绑定，不必再为同一动作配置扩展快捷键。
 
+**快捷键 → 框选内快捷键**可单独设置复制、贴图和编辑。例如把框选内的「贴图」改为 `Ctrl+T` 后，在选框里会贴出当前选区；退出框选后，`Ctrl+T` 仍按原来的全局设置工作。`Enter` 和 `Esc` 保留给确认和取消。
+
 ### 滚动长截图
 
 1. 打开要截取的页面并滚到起点，按 `Super+Shift+L`。

@@ -4,6 +4,7 @@ import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk?version=4.0';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
+import {parseSelectionShortcut, SELECTION_ACTIONS} from './selectionShortcuts.js';
 import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 
 const MEDIA_KEYS = 'org.gnome.settings-daemon.plugins.media-keys';
@@ -30,7 +31,7 @@ function includesAccelerator(values, accelerator) {
 }
 
 /** 检查 Pinshot 与可读取的 GNOME 内建／自定义绑定，不修改系统配置 */
-function findConflict(settings, action, accelerator) {
+function findGlobalConflict(settings, action, accelerator) {
     for (const other of SHORTCUT_ACTIONS) {
         if (action.key !== other.key && includesAccelerator(settings.get_strv(other.key), accelerator)) {
             return other.title;
@@ -70,6 +71,17 @@ function findConflict(settings, action, accelerator) {
     return null;
 }
 
+/** 框选已抓取输入，允许与桌面的绑定共用同一个键，只检测同组动作 */
+function findSelectionConflict(settings, action, accelerator) {
+    const label = parseSelectionShortcut(accelerator)?.label;
+    if (!label) {
+        return null;
+    }
+    const other = SELECTION_ACTIONS.find(({key}) => key !== action.key &&
+        parseSelectionShortcut(settings.get_strv(key)[0] ?? '')?.label === label);
+    return other?.label ?? null;
+}
+
 /** Pinshot 快捷键、截图输出与贴图操作速查 */
 export default class PinshotPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -83,6 +95,15 @@ export default class PinshotPreferences extends ExtensionPreferences {
             shortcuts.add(this._createShortcutRow(window, settings, action));
         }
         page.add(shortcuts);
+
+        const selection = new Adw.PreferencesGroup({
+            title: '框选内快捷键',
+            description: '只在截图选框内生效，可和全局键共用，例如 Ctrl+T。Enter 确认默认动作，Esc 取消。',
+        });
+        for (const {key, label} of SELECTION_ACTIONS) {
+            selection.add(this._createShortcutRow(window, settings, {key, title: label}, true));
+        }
+        page.add(selection);
         page.add(this._createPinControls());
         window.add(page);
         window.add(this._createScreenshotPage(settings));
@@ -132,7 +153,8 @@ export default class PinshotPreferences extends ExtensionPreferences {
         return page;
     }
 
-    _createShortcutRow(window, settings, action) {
+    _createShortcutRow(window, settings, action, local = false) {
+        const findConflict = local ? findSelectionConflict : findGlobalConflict;
         const row = new Adw.ActionRow({title: action.title, subtitle: action.description ?? ''});
         const label = new Gtk.ShortcutLabel({disabled_text: '未设置', valign: Gtk.Align.CENTER});
         const sync = () => label.set_accelerator(settings.get_strv(action.key)[0] ?? '');
@@ -144,7 +166,7 @@ export default class PinshotPreferences extends ExtensionPreferences {
         });
 
         const edit = new Gtk.Button({label: '更改', valign: Gtk.Align.CENTER});
-        edit.connect('clicked', () => this._recordShortcut(window, settings, action));
+        edit.connect('clicked', () => this._recordShortcut(window, settings, action, local, findConflict));
         const clear = new Gtk.Button({label: '禁用', valign: Gtk.Align.CENTER});
         clear.connect('clicked', () => settings.set_strv(action.key, []));
         const reset = new Gtk.Button({label: '恢复默认', valign: Gtk.Align.CENTER});
@@ -167,8 +189,9 @@ export default class PinshotPreferences extends ExtensionPreferences {
         return row;
     }
 
-    _recordShortcut(window, settings, action) {
-        const hint = '按下组合键或功能键，按 Esc 取消。';
+    _recordShortcut(window, settings, action, local, findConflict) {
+        const localKeys = '可用 A–Z 或 F1–F12，可搭配 Ctrl、Shift。Enter 保留给确认，按 Esc 取消。';
+        const hint = local ? localKeys : '按下组合键或功能键，按 Esc 取消。';
         const dialog = new Adw.AlertDialog({heading: action.title, body: hint});
         dialog.add_response('cancel', '取消');
         dialog.set_close_response('cancel');
@@ -179,12 +202,19 @@ export default class PinshotPreferences extends ExtensionPreferences {
                 dialog.close();
                 return true;
             }
-            const functionKey = key >= Gdk.KEY_F1 && key <= Gdk.KEY_F35;
-            if ((!(modifiers & GLOBAL_MODIFIERS) && !functionKey) || !Gtk.accelerator_valid(key, modifiers)) {
-                dialog.set_body('请使用带 Ctrl、Alt 或 Super 等修饰键的组合键，或单独使用功能键。');
-                return true;
-            }
             const accelerator = Gtk.accelerator_name(Gdk.keyval_to_lower(key), modifiers);
+            if (local) {
+                if (!parseSelectionShortcut(accelerator)) {
+                    dialog.set_body(localKeys);
+                    return true;
+                }
+            } else {
+                const functionKey = key >= Gdk.KEY_F1 && key <= Gdk.KEY_F35;
+                if ((!(modifiers & GLOBAL_MODIFIERS) && !functionKey) || !Gtk.accelerator_valid(key, modifiers)) {
+                    dialog.set_body('请使用带 Ctrl、Alt 或 Super 等修饰键的组合键，或单独使用功能键。');
+                    return true;
+                }
+            }
             const conflict = findConflict(settings, action, accelerator);
             if (conflict) {
                 dialog.set_body(`此快捷键已被「${conflict}」使用，请另选一组。`);

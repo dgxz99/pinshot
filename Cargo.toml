@@ -17,6 +17,7 @@ anyhow = "1"
 ashpd = { version = "0.13", default-features = false, features = ["screencast", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
 dirs = "6"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gstreamer = "0.25"

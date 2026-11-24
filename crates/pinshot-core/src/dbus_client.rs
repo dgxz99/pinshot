@@ -25,6 +25,7 @@ trait Frontend1 {
     fn set_system_hidden(&self, hidden: bool) -> zbus::Result<bool>;
     fn unghost_all(&self) -> zbus::Result<u32>;
     fn list_active_pins(&self) -> zbus::Result<String>;
+    fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
     fn select_screenshot(
         &self,
@@ -118,6 +119,25 @@ impl FrontendClient {
                 Ok((scale, default_action.to_owned()))
             }
             result => result.map_err(map_zbus_err),
+        }
+    }
+
+    /// 查询外部剪贴板图片的显示倍率；旧版或未启动的扩展沿用逻辑尺寸
+    pub fn clipboard_image_scale(&self) -> Result<f64> {
+        match self.proxy.get_clipboard_image_scale() {
+            Ok(scale) if scale.is_finite() && scale > 0.0 => Ok(scale),
+            Ok(scale) => Err(PinshotError::Dbus(format!("无效的剪贴板图片倍率：{scale}"))),
+            Err(zbus::Error::MethodError(name, _, _))
+                if matches!(
+                    name.as_str(),
+                    "org.freedesktop.DBus.Error.UnknownMethod"
+                        | "org.freedesktop.DBus.Error.ServiceUnknown"
+                        | "org.freedesktop.DBus.Error.NameHasNoOwner"
+                ) =>
+            {
+                Ok(1.0)
+            }
+            Err(err) => Err(map_zbus_err(err)),
         }
     }
 

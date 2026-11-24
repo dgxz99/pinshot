@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::capture::ensure_png_bytes;
+use crate::clipboard_png;
 use crate::desktop::decode_file_uri;
 use crate::error::{PinshotError, Result};
 
@@ -11,12 +12,14 @@ use crate::error::{PinshotError, Result};
 const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp"];
 
 /// 剪贴板解析结果
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ClipboardContent {
     /// 已统一转码为标准 PNG 的图片
     Image {
         png_bytes: Vec<u8>,
         title_preview: String,
+        /// Pinshot 复制时记录的像素与逻辑尺寸之比；外部图片通常没有此值
+        source_scale: Option<f64>,
     },
     /// 非空 UTF-8 纯文本
     Text(String),
@@ -44,10 +47,12 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
                 if let Some(raw) = paste_bytes(&mime)?
                     && !raw.is_empty()
                 {
+                    let source_scale = clipboard_png::source_scale(&raw);
                     let png_bytes = ensure_png_bytes(&raw)?;
                     return Ok(ClipboardContent::Image {
                         png_bytes,
                         title_preview: "剪贴板图片".to_string(),
+                        source_scale,
                     });
                 }
             }
@@ -65,6 +70,7 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
                         return Ok(ClipboardContent::Image {
                             png_bytes,
                             title_preview: title,
+                            source_scale: None,
                         });
                     }
                 }
@@ -83,15 +89,16 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
     Ok(ClipboardContent::Empty)
 }
 
-/// 将 PNG 字节流写入 Wayland 剪贴板
-pub fn copy_png_bytes(bytes: &[u8]) -> Result<()> {
-    run_wl_copy("image/png", bytes)
+/// 将 PNG 写入 Wayland 剪贴板，并保留重新贴图所需的原始倍率
+pub fn copy_png_bytes(bytes: &[u8], source_scale: f64) -> Result<()> {
+    let tagged = clipboard_png::with_source_scale(bytes, source_scale);
+    run_wl_copy("image/png", tagged.as_deref().unwrap_or(bytes))
 }
 
-/// 读取本地 PNG 文件并写入 Wayland 剪贴板
-pub fn copy_png_file(path: &Path) -> Result<()> {
+/// 读取本地 PNG 文件并带上倍率写入 Wayland 剪贴板
+pub fn copy_png_file(path: &Path, source_scale: f64) -> Result<()> {
     let bytes = fs::read(path).map_err(|e| PinshotError::io(path, e))?;
-    copy_png_bytes(&bytes)
+    copy_png_bytes(&bytes, source_scale)
 }
 
 /// 将 UTF-8 纯文本写入 Wayland 剪贴板

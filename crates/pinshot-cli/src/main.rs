@@ -162,9 +162,12 @@ fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
         return Ok(());
     };
     match captured.action {
-        ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(&captured.png_bytes)?),
+        ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(
+            &captured.png_bytes,
+            captured.source_scale,
+        )?),
         ScreenshotAction::Pin => pin_screenshot(&frontend, captured),
-        ScreenshotAction::Edit => edit_screenshot(&frontend, &captured.png_bytes),
+        ScreenshotAction::Edit => edit_screenshot(&frontend, &captured),
     }
 }
 
@@ -185,17 +188,17 @@ fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage) -> Result<
     )?;
 
     push_pin_to_frontend(&store, &record)?;
-    if let Err(error) = clipboard::copy_png_file(&record.image_path) {
+    if let Err(error) = clipboard::copy_png_bytes(&captured.png_bytes, captured.source_scale) {
         notify::warn("Pinshot", &format!("截图已贴出，但复制失败：{error}"));
     }
     finish_screenshot(&cfg, &output, &captured.png_bytes, "已截图并贴图")
 }
 
-fn edit_screenshot(frontend: &FrontendClient, png: &[u8]) -> Result<()> {
-    if let Some(edited) = annotate::edit_png(png)? {
+fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Result<()> {
+    if let Some(edited) = annotate::edit_png(&captured.png_bytes)? {
         let cfg = Config::load_or_init()?;
         let output = frontend.screenshot_settings()?;
-        clipboard::copy_png_bytes(&edited)?;
+        clipboard::copy_png_bytes(&edited, captured.source_scale)?;
         finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;
     }
     Ok(())
@@ -225,7 +228,7 @@ fn cmd_longshot(choose_screen: bool) -> Result<()> {
         &cfg.cache,
     )?;
     push_pin_to_frontend(&store, &record)?;
-    if let Err(error) = clipboard::copy_png_file(&record.image_path) {
+    if let Err(error) = clipboard::copy_png_bytes(&png, source_scale) {
         notify::warn("Pinshot", &format!("长图已贴出，但复制失败：{error}"));
     }
     finish_screenshot(&cfg, &output, &png, "已完成长截图并贴图")
@@ -302,17 +305,24 @@ fn cmd_pin_clipboard() -> Result<()> {
         ClipboardContent::Image {
             png_bytes,
             title_preview,
-        } => store.add_png_entry(
-            NewEntryRequest {
-                kind: PinKind::ClipboardImage,
-                png_bytes: &png_bytes,
-                text_content: None,
-                title_preview,
-                source_scale: 1.0,
-                active: true,
-            },
-            &cfg.cache,
-        )?,
+            source_scale,
+        } => {
+            let source_scale = match source_scale {
+                Some(scale) => scale,
+                None => FrontendClient::connect()?.clipboard_image_scale()?,
+            };
+            store.add_png_entry(
+                NewEntryRequest {
+                    kind: PinKind::ClipboardImage,
+                    png_bytes: &png_bytes,
+                    text_content: None,
+                    title_preview,
+                    source_scale,
+                    active: true,
+                },
+                &cfg.cache,
+            )?
+        }
         ClipboardContent::Text(raw_text) => {
             let rendered = text_render::render_text_card(&raw_text, &cfg.text_card)?;
             store.add_png_entry(
@@ -490,7 +500,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             let record = store
                 .get(&id)?
                 .with_context(|| format!("未找到贴图记录: {id}"))?;
-            clipboard::copy_png_file(&record.image_path)?;
+            clipboard::copy_png_file(&record.image_path, record.source_scale)?;
             notify::info("pinshot", "已复制图片到剪贴板");
             Ok(())
         }

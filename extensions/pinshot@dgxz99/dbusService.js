@@ -75,6 +75,9 @@ const FRONTEND_IFACE_XML = `
     <signal name="LongshotAction">
       <arg type="s" name="action"/>
     </signal>
+    <method name="GetClipboardImageScale">
+      <arg type="d" direction="out" name="scale"/>
+    </method>
     <method name="GetScreenshotSettings">
       <arg type="b" direction="out" name="auto_save"/>
       <arg type="s" direction="out" name="save_dir"/>
@@ -170,6 +173,14 @@ export class PinshotDbusService {
 
     ListActivePins() {
         return JSON.stringify(this._pinManager.listActivePins());
+    }
+
+    GetClipboardImageScale() {
+        if (!this._settings.get_boolean('clipboard-image-device-pixels')) {
+            return 1.0;
+        }
+        const scale = global.display.get_monitor_scale(global.display.get_current_monitor());
+        return scale > 0 ? scale : 1.0;
     }
 
     GetScreenshotSettings() {

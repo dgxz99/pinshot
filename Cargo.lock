@@ -973,6 +973,7 @@ version = "0.1.0"
 dependencies = [
  "ashpd",
  "chrono",
+ "crc32fast",
  "dirs",
  "futures-util",
  "gstreamer",

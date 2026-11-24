@@ -1,6 +1,7 @@
 pub mod annotate;
 pub mod capture;
 pub mod clipboard;
+mod clipboard_png;
 pub mod config;
 pub mod dbus_client;
 pub mod desktop;

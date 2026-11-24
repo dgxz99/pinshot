@@ -119,8 +119,16 @@ export default class PinshotPreferences extends ExtensionPreferences {
         });
         settings.bind('screenshot-notify', notify, 'active', Gio.SettingsBindFlags.DEFAULT);
         group.add(notify);
+        const clipboard = new Adw.PreferencesGroup({title: '剪贴板图片'});
+        const devicePixels = new Adw.SwitchRow({
+            title: '外部图片按屏幕像素 1:1 显示',
+            subtitle: '用于没有原始倍率的图片，以指针所在屏幕为准。Pinshot 复制的截图优先保留原来的大小，大图仍会自动适屏。',
+        });
+        settings.bind('clipboard-image-device-pixels', devicePixels, 'active', Gio.SettingsBindFlags.DEFAULT);
+        clipboard.add(devicePixels);
         page.add(group);
         page.add(location);
+        page.add(clipboard);
         return page;
     }
 

@@ -378,8 +378,8 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 
 ### M3：滚动长图（`pinshot longshot`）
 - **交付内容**：
-  - `longshot/mod.rs`（Portal ScreenCast 授权与会话清理已接入，`restore_token` 复用待接入）；
-  - 前端 `longshot.js` 负责透明框选、非模态控制条及录制结束后的清理；
+  - `longshot/mod.rs` 负责 Portal ScreenCast 授权、复用与轮换已记住的授权令牌、会话清理；
+  - 前端 `longshot.js` 负责透明框选、选区外录制边框、非模态控制条及录制结束后的清理；
   - GStreamer 采帧和单屏逻辑选区裁剪、纯 Rust 重叠拼接已接入；可通过定时录制入口验证 PNG 输出；
   - 录前自动隐藏旧贴图、录完自动恢复、自动复制剪贴板并按适配高度贴图。
 - **验收标准**：

@@ -4,6 +4,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {createActionButton} from './actionIcons.js';
 import {containsPoint, handleAt, handlesFor, moveRegion, regionBetween, resizeRegion,
     toolbarMonitor, toolbarPosition} from './selectionGeometry.js';
 
@@ -22,7 +23,8 @@ export const CANCELLED_REGION = [0, 0, 0, 0];
 
 /** 保留可调整的选区，只有确认或取消才结束模态并归还输入 */
 export class RegionSelector {
-    constructor(area, {name, bounds, minEdge = 8, hint = null, background = null, actions, defaultAction}) {
+    constructor(area, {name, bounds, minEdge = 8, hint = null, background = null, actions, defaultAction,
+        initialRect = null}) {
         this._area = area;
         this._name = name;
         this._bounds = bounds ?? {left: 0, top: 0, right: area.width, bottom: area.height};
@@ -31,7 +33,7 @@ export class RegionSelector {
         this._background = background;
         this._actions = actions;
         this._defaultAction = defaultAction;
-        this._rect = null;
+        this._rect = initialRect;
         this._drag = null;
         this._grab = null;
     }
@@ -61,8 +63,9 @@ export class RegionSelector {
         }
         this._toolbar = this._createToolbar();
         this._layer.add_child(this._toolbar);
-        this._draw(null);
+        this._draw(this._rect);
         Main.layoutManager.uiGroup.add_child(this._layer);
+        this._showToolbar();
         this._grab = Main.pushModal(this._layer, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
         if (this._grab.is_revoked()) {
             this.close();
@@ -90,15 +93,14 @@ export class RegionSelector {
         const toolbar = new St.BoxLayout({name: 'pinshot-selection-toolbar',
             style_class: 'pinshot-selection-toolbar', reactive: true, visible: false});
         toolbar.set_cursor_type(Clutter.CursorType.DEFAULT);
-        for (const {id, label, shortcut} of this._actions) {
-            const hint = shortcut?.label ?? (id === this._defaultAction ? 'Enter' : null);
-            const button = new St.Button({name: `pinshot-selection-action-${id}`,
-                label: hint ? `${label}  ${hint}` : label,
-                style_class: 'pinshot-selection-button button', reactive: true, track_hover: true});
-            if (id === this._defaultAction) {
-                button.add_style_class_name('pinshot-selection-primary');
-            }
-            button.connect('clicked', () => this._confirm(id));
+        for (const action of this._actions) {
+            const button = createActionButton('pinshot-selection-action', action, () => {
+                if (action.id === 'cancel') {
+                    this.close();
+                } else {
+                    this._confirm(action.id === 'confirm' ? this._defaultAction : action.id);
+                }
+            });
             toolbar.add_child(button);
         }
         return toolbar;

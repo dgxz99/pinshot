@@ -4,6 +4,7 @@ use tokio::sync::watch;
 use super::recorder::Recorder;
 use super::{LogicalRegion, Progress, Recording, ScreenSelection, failure, run_capture};
 use crate::Result;
+use crate::capture::StageRegion;
 
 #[zbus::proxy(
     interface = "io.github.dgxz99.Pinshot.Frontend1",
@@ -19,6 +20,14 @@ trait LongshotFrontend {
         width: i32,
         height: i32,
     ) -> zbus::Result<(u32, u32, u32, u32)>;
+    fn select_longshot_region(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        stage_region: StageRegion,
+    ) -> zbus::Result<(u32, u32, u32, u32)>;
     fn update_longshot(&self, height: u32, warning: bool) -> zbus::Result<bool>;
     #[zbus(signal)]
     fn longshot_action(&self, action: &str) -> zbus::Result<()>;
@@ -26,7 +35,10 @@ trait LongshotFrontend {
 
 /// 由 GNOME 扩展框选与控制共享的那块显示器，用户确认完成后返回成品
 /// `choose_screen` 为真时，本次不恢复上次授权的显示器
-pub fn record_desktop(choose_screen: bool) -> Result<Option<Recording>> {
+pub fn record_desktop(
+    choose_screen: bool,
+    initial_region: Option<StageRegion>,
+) -> Result<Option<Recording>> {
     let selection = if choose_screen {
         ScreenSelection::Choose
     } else {
@@ -46,10 +58,14 @@ pub fn record_desktop(choose_screen: bool) -> Result<Option<Recording>> {
             .receive_longshot_action()
             .await
             .map_err(|error| failure("监听长图操作", error))?;
-        let (x, y, width, height) = frontend
-            .select_longshot(x, y, width, height)
-            .await
-            .map_err(|error| failure("框选长图区域", error))?;
+        let selection = if let Some(region) = initial_region {
+            frontend
+                .select_longshot_region(x, y, width, height, region)
+                .await
+        } else {
+            frontend.select_longshot(x, y, width, height).await
+        };
+        let (x, y, width, height) = selection.map_err(|error| failure("框选长图区域", error))?;
         if width == 0 || height == 0 {
             return Ok(None);
         }

@@ -41,6 +41,15 @@ impl ScreenshotAction {
     }
 }
 
+/// 虚拟桌面逻辑坐标 (x, y, width, height)，可用于把选区交给长截图
+pub type StageRegion = (i32, i32, i32, i32);
+
+/// 区域截图确认后，要么交付一张静态 PNG，要么用原选区切换到长截图
+pub enum ScreenshotSelection {
+    Image(CapturedImage),
+    Longshot(StageRegion),
+}
+
 /// 区域截屏成功后的输出图像和交付动作
 #[derive(Debug)]
 pub struct CapturedImage {
@@ -138,10 +147,17 @@ fn persist_unique_png(
 pub fn capture_interactive_region(
     frontend: &FrontendClient,
     default_action: ScreenshotAction,
-) -> Result<Option<CapturedImage>> {
+) -> Result<Option<ScreenshotSelection>> {
     let temp_dir = std::env::temp_dir();
     let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
-    let (source_scale, action) = frontend.select_screenshot(&file, default_action.as_str())?;
+    let (source_scale, action, region) =
+        frontend.select_screenshot(&file, default_action.as_str())?;
+    if action == "longshot" {
+        if cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0 {
+            return Ok(Some(ScreenshotSelection::Longshot(region)));
+        }
+        return Err(PinshotError::Dbus("前端返回无效的长截图选区".into()));
+    }
     if source_scale == 0.0 {
         return Ok(None);
     }
@@ -156,11 +172,11 @@ pub fn capture_interactive_region(
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
     file.read_to_end(&mut png_bytes)
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
-    Ok(Some(CapturedImage {
+    Ok(Some(ScreenshotSelection::Image(CapturedImage {
         action,
         png_bytes,
         source_scale,
-    }))
+    })))
 }
 
 /// 确保图像字节流为标准 PNG（已是 PNG 时零重编码开销直接复用）

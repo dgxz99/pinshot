@@ -1,8 +1,8 @@
 /** 同一组动作供截图工具条和框选快捷键设置使用，不注册全局绑定 */
 export const SELECTION_ACTIONS = [
-    {id: 'copy', key: 'selection-copy', label: '复制'},
-    {id: 'pin', key: 'selection-pin', label: '贴图'},
-    {id: 'edit', key: 'selection-edit', label: '编辑'},
+    {id: 'edit', key: 'selection-edit', label: '标注', iconName: 'document-edit-symbolic'},
+    {id: 'pin', key: 'selection-pin', label: '贴图', iconName: 'view-pin-symbolic'},
+    {id: 'copy', key: 'selection-copy', label: '复制', iconName: 'edit-copy-symbolic'},
 ];
 
 /** 解析 GTK 加速键格式中的框选按键；Enter 和 Esc 专用于确认与取消 */

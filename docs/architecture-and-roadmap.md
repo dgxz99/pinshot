@@ -102,11 +102,13 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
-| `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 冻结画面后可调整选区；确认时写入 PNG，并返回纹理倍率和用户选定的 `copy`、`pin` 或 `edit`；取消返回 `0` 与空字符串 |
+| `ChooseScreenshot(output_fd, default_action, offer_longshot)` | `h`, `s`, `b` | `d`, `s`, `(iiii)` | 静态截图写入 PNG，返回纹理倍率和动作；切换到长图时不写 PNG，返回 `0`、`longshot` 和桌面逻辑选区。取消返回 `0` 与空动作 |
+| `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 兼容旧版 CLI，只提供静态截图动作；取消返回 `0` 与空字符串 |
 | `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `GetClipboardImageScale()` | 无 | `d` | 外部图片未携带原始倍率时：默认返回 `1.0`；启用屏幕像素 1:1 时返回指针所在显示器的倍率 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
+| `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 长图框选时带入普通截图的选区；只在它完全处于获准录制范围内时复用 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
 
 信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `finish` 或 `cancel`。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。

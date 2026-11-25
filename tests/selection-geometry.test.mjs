@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {handleAt, handlesFor, moveRegion, regionBetween, resizeRegion, toolbarMonitor,
+import {handleAt, handlesFor, initialRegionOnMonitor, moveRegion, regionBetween, resizeRegion, toolbarMonitor,
     toolbarPosition} from '../extensions/pinshot@dgxz99/selectionGeometry.js';
 
 const bounds = {left: 10, top: 20, right: 300, bottom: 200};
@@ -33,6 +33,17 @@ test('resize retains the opposite edge, clamps the minimum, and never crosses th
 
 const first = {x: 0, y: 0, width: 1024, height: 768};
 const second = {x: 1024, y: 200, width: 1280, height: 800};
+
+test('reuses absolute selection only if the entire region fits the shared recording bounds', () => {
+    const area = {x: -1024, y: 200, width: 1024, height: 768};
+    const workArea = {left: 4, top: 42, right: 1020, bottom: 700};
+    assert.deepEqual(initialRegionOnMonitor([-924, 311, 400, 252], area, workArea, 32), [100, 111, 400, 252]);
+    assert.equal(initialRegionOnMonitor([300, 311, 400, 252], area, workArea, 32), null);
+    assert.equal(initialRegionOnMonitor([-40, 311, 400, 252], area, workArea, 32), null);
+    assert.equal(initialRegionOnMonitor([-924, 800, 400, 252], area, workArea, 32), null);
+    assert.equal(initialRegionOnMonitor([-924, 311, 16, 252], area, workArea, 32), null);
+    assert.equal(initialRegionOnMonitor(null, area, workArea, 32), null);
+});
 
 test('toolbar stays on the monitor with more of the selection', () => {
     assert.equal(toolbarMonitor([980, 250, 130, 150], [first, second]), second);

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use pinshot_core::annotate;
-use pinshot_core::capture::{self, CapturedImage, ScreenshotAction};
+use pinshot_core::capture::{self, CapturedImage, ScreenshotAction, ScreenshotSelection};
 use pinshot_core::clipboard::{self, ClipboardContent};
 use pinshot_core::protocol::PinKind;
 use pinshot_core::store::NewEntryRequest;
@@ -29,7 +29,9 @@ enum Commands {
     Ping,
     /// 显示当前配置路径、缓存统计与前端连接状态
     Status,
-    /// 区域截屏并直接贴图
+    /// 打开区域截图工具条，默认复制截图
+    Capture,
+    /// 区域截屏，默认贴图
     CapturePin,
     /// 区域截屏并在 Satty 标注，确认后复制图片
     CaptureEdit,
@@ -106,12 +108,11 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Ping => cmd_ping(),
         Commands::Status => cmd_status(),
+        Commands::Capture => cmd_capture(ScreenshotAction::Copy),
         Commands::CapturePin => cmd_capture(ScreenshotAction::Pin),
         Commands::CaptureEdit => cmd_capture(ScreenshotAction::Edit),
         #[cfg(feature = "longshot")]
-        Commands::Longshot { choose_screen } => cmd_longshot(choose_screen).inspect_err(|error| {
-            notify::warn("Pinshot 长截图", &format!("{error:#}"));
-        }),
+        Commands::Longshot { choose_screen } => cmd_longshot(choose_screen, None),
         Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::ToggleHide => cmd_toggle_hide(),
         Commands::UnghostAll => cmd_unghost_all(),
@@ -158,8 +159,13 @@ fn cmd_status() -> Result<()> {
 
 fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
     let frontend = FrontendClient::connect()?;
-    let Some(captured) = capture::capture_interactive_region(&frontend, default_action)? else {
-        return Ok(());
+    let captured = match capture::capture_interactive_region(&frontend, default_action)? {
+        None => return Ok(()),
+        Some(ScreenshotSelection::Image(captured)) => captured,
+        #[cfg(feature = "longshot")]
+        Some(ScreenshotSelection::Longshot(region)) => return cmd_longshot(false, Some(region)),
+        #[cfg(not(feature = "longshot"))]
+        Some(ScreenshotSelection::Longshot(_)) => anyhow::bail!("此版本未启用滚动长截图"),
     };
     match captured.action {
         ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(
@@ -205,11 +211,19 @@ fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Resul
 }
 
 #[cfg(feature = "longshot")]
-fn cmd_longshot(choose_screen: bool) -> Result<()> {
+fn cmd_longshot(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
+    longshot(choose_screen, initial_region).inspect_err(|error| {
+        notify::warn("Pinshot 长截图", &format!("{error:#}"));
+    })
+}
+
+#[cfg(feature = "longshot")]
+fn longshot(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
     let cfg = Config::load_or_init()?;
     let frontend = FrontendClient::connect()?;
     let output = frontend.screenshot_settings()?;
-    let Some(recording) = pinshot_core::longshot::record_desktop(choose_screen)? else {
+    let Some(recording) = pinshot_core::longshot::record_desktop(choose_screen, initial_region)?
+    else {
         return Ok(());
     };
     let source_scale = recording.source_scale;

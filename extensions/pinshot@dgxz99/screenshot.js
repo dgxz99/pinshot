@@ -3,13 +3,14 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {RegionSelector} from './regionSelector.js';
+import {CANCEL_ACTION, CHECK_ICON, SCROLLSHOT_ICON} from './actionIcons.js';
+import {CANCELLED_REGION, RegionSelector} from './regionSelector.js';
 import {parseSelectionShortcut, SELECTION_ACTIONS} from './selectionShortcuts.js';
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-const LEGACY_ACTIONS = [{id: 'confirm', label: '确认'}];
-const CANCELLED = [0, ''];
+const LONGSHOT_ACTION = {id: 'longshot', label: '滚动长截图', gicon: SCROLLSHOT_ICON};
+const CANCELLED = [0, '', CANCELLED_REGION];
 
 /** 避免在系统截图或录屏已经打开时叠加 Pinshot 框选 */
 export function nativeScreenshotActive() {
@@ -28,14 +29,23 @@ export class PinshotScreenshot {
         return this._session !== null;
     }
 
-    async capture(stream, owner, connection, defaultAction) {
-        const actions = defaultAction === null ? LEGACY_ACTIONS : SELECTION_ACTIONS.map(({id, key, label}) => ({
-            id, label, shortcut: parseSelectionShortcut(this._settings.get_strv(key)[0] ?? ''),
-        }));
-        const initialAction = defaultAction ?? 'confirm';
-        if (!actions.some(({id}) => id === initialAction)) {
+    async capture(stream, owner, connection, defaultAction, offerLongshot = false) {
+        const initial = SELECTION_ACTIONS.find(({id}) => id === defaultAction);
+        if (!initial && defaultAction !== null) {
             throw new Error('无效的截图默认动作');
         }
+        const actions = [];
+        if (offerLongshot) {
+            actions.push(LONGSHOT_ACTION);
+        }
+        if (initial) {
+            for (const action of SELECTION_ACTIONS) {
+                const shortcut = parseSelectionShortcut(this._settings.get_strv(action.key)[0] ?? '');
+                actions.push({...action, shortcut});
+            }
+        }
+        actions.push(CANCEL_ACTION, {id: 'confirm', iconName: CHECK_ICON, primary: true,
+            label: initial ? `完成：${initial.label}` : '确认'});
         if (this.active || nativeScreenshotActive()) {
             throw new Error('请先完成或取消当前截图');
         }
@@ -60,7 +70,7 @@ export class PinshotScreenshot {
                 return CANCELLED;
             }
             session.selector = new RegionSelector({x: 0, y: 0, width, height}, {
-                name: 'pinshot-screenshot-selector', background: content, actions, defaultAction: initialAction,
+                name: 'pinshot-screenshot-selector', background: content, actions, defaultAction: defaultAction ?? 'confirm',
             });
             const selection = await session.selector.select();
             session.selector = null;
@@ -68,8 +78,11 @@ export class PinshotScreenshot {
                 return CANCELLED;
             }
             const {rect, action} = selection;
+            if (action === 'longshot') {
+                return [0, action, rect];
+            }
             await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);
-            return session.cancellable.is_cancelled() ? CANCELLED : [scale, action];
+            return session.cancellable.is_cancelled() ? CANCELLED : [scale, action, CANCELLED_REGION];
         } catch (error) {
             if (session.cancellable.is_cancelled()) {
                 return CANCELLED;

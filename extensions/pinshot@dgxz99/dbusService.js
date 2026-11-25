@@ -57,11 +57,30 @@ const FRONTEND_IFACE_XML = `
       <arg type="d" direction="out" name="scale"/>
       <arg type="s" direction="out" name="action"/>
     </method>
+    <method name="ChooseScreenshot">
+      <arg type="h" direction="in" name="output_fd"/>
+      <arg type="s" direction="in" name="default_action"/>
+      <arg type="b" direction="in" name="offer_longshot"/>
+      <arg type="d" direction="out" name="scale"/>
+      <arg type="s" direction="out" name="action"/>
+      <arg type="(iiii)" direction="out" name="stage_region"/>
+    </method>
     <method name="SelectLongshot">
       <arg type="i" direction="in" name="monitor_x"/>
       <arg type="i" direction="in" name="monitor_y"/>
       <arg type="i" direction="in" name="monitor_width"/>
       <arg type="i" direction="in" name="monitor_height"/>
+      <arg type="u" direction="out" name="x"/>
+      <arg type="u" direction="out" name="y"/>
+      <arg type="u" direction="out" name="width"/>
+      <arg type="u" direction="out" name="height"/>
+    </method>
+    <method name="SelectLongshotRegion">
+      <arg type="i" direction="in" name="monitor_x"/>
+      <arg type="i" direction="in" name="monitor_y"/>
+      <arg type="i" direction="in" name="monitor_width"/>
+      <arg type="i" direction="in" name="monitor_height"/>
+      <arg type="(iiii)" direction="in" name="stage_region"/>
       <arg type="u" direction="out" name="x"/>
       <arg type="u" direction="out" name="y"/>
       <arg type="u" direction="out" name="width"/>
@@ -191,11 +210,20 @@ export class PinshotDbusService {
     }
 
     async SelectLongshotAsync(geometry, invocation) {
+        await this._selectLongshot(geometry, null, invocation);
+    }
+
+    async SelectLongshotRegionAsync([x, y, width, height, initialRegion], invocation) {
+        await this._selectLongshot([x, y, width, height], initialRegion, invocation);
+    }
+
+    async _selectLongshot(geometry, initialRegion, invocation) {
         try {
             if (this._screenshot.active || nativeScreenshotActive()) {
                 throw new Error('请先完成或取消当前截图或录屏');
             }
-            const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(), geometry);
+            const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(),
+                geometry, initialRegion);
             invocation.return_value(new GLib.Variant('(uuuu)', rect));
         } catch (error) {
             invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, error.message);
@@ -208,14 +236,18 @@ export class PinshotDbusService {
     }
 
     async CaptureScreenshotAsync([handle], invocation) {
-        await this._captureScreenshot(handle, null, invocation);
+        await this._captureScreenshot(handle, null, false, '(d)', invocation);
     }
 
     async SelectScreenshotAsync([handle, defaultAction], invocation) {
-        await this._captureScreenshot(handle, defaultAction, invocation);
+        await this._captureScreenshot(handle, defaultAction, false, '(ds)', invocation);
     }
 
-    async _captureScreenshot(handle, defaultAction, invocation) {
+    async ChooseScreenshotAsync([handle, defaultAction, offerLongshot], invocation) {
+        await this._captureScreenshot(handle, defaultAction, offerLongshot, '(ds(iiii))', invocation);
+    }
+
+    async _captureScreenshot(handle, defaultAction, offerLongshot, replyType, invocation) {
         try {
             if (this._longshot.active) {
                 throw new Error('请先完成或取消长截图');
@@ -228,12 +260,16 @@ export class PinshotDbusService {
             let result;
             try {
                 result = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection(),
-                    defaultAction);
+                    defaultAction, offerLongshot);
             } finally {
                 stream.close(null);
             }
-            const reply = defaultAction === null ? new GLib.Variant('(d)', [result[0]]) : new GLib.Variant('(ds)', result);
-            invocation.return_value(reply);
+            if (replyType === '(d)') {
+                result = result.slice(0, 1);
+            } else if (replyType === '(ds)') {
+                result = result.slice(0, 2);
+            }
+            invocation.return_value(new GLib.Variant(replyType, result));
         } catch (error) {
             invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.CaptureFailed`, error.message);
         }

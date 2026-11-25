@@ -50,12 +50,16 @@
     spacing: 8px;
 }
 
-.pinshot-selection-button,
-.pinshot-longshot-button {
-    padding: 4px 10px;
+.pinshot-selection-toolbar {
+    padding: 4px;
+    spacing: 4px;
+}
+
+.pinshot-action-button {
+    padding: 7px;
     border-radius: 6px;
 }
 
-.pinshot-selection-primary {
+.pinshot-action-primary {
     color: #b9d9ff;
 }

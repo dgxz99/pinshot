@@ -4,7 +4,9 @@ import Pango from 'gi://Pango';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {CANCEL_ACTION, CHECK_ICON, createActionButton} from './actionIcons.js';
 import {CANCELLED_REGION, RegionSelector} from './regionSelector.js';
+import {initialRegionOnMonitor} from './selectionGeometry.js';
 
 const HUD_SPACE = 68;
 const MIN_EDGE = 32;
@@ -50,7 +52,7 @@ export class LongshotController {
         return this._session !== null;
     }
 
-    async select(owner, connection, geometry) {
+    async select(owner, connection, geometry, initialRegion) {
         if (this.active) {
             throw new Error('已有长截图正在运行');
         }
@@ -70,15 +72,15 @@ export class LongshotController {
         const left = workArea.x - monitor.x;
         const top = workArea.y - monitor.y;
         const bottom = top + workArea.height - HUD_SPACE;
+        const bounds = {left: left + OUTLINE_MARGIN, top: top + OUTLINE_MARGIN,
+            right: left + workArea.width - OUTLINE_MARGIN, bottom};
+        const initialRect = initialRegionOnMonitor(initialRegion, monitor, bounds, MIN_EDGE);
         const selector = new RegionSelector(monitor, {
-            name: 'pinshot-longshot-selector',
-            bounds: {left: left + OUTLINE_MARGIN, top: top + OUTLINE_MARGIN,
-                right: left + workArea.width - OUTLINE_MARGIN, bottom},
-            minEdge: MIN_EDGE,
-            actions: [{id: 'start', label: '开始录制'}],
+            name: 'pinshot-longshot-selector', bounds, initialRect, minEdge: MIN_EDGE,
+            actions: [CANCEL_ACTION, {id: 'start', label: '开始录制', iconName: CHECK_ICON, primary: true}],
             defaultAction: 'start',
             hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24,
-                text: '拖动框选滚动内容 · Esc 取消'},
+                text: initialRegion ? '请在授权的屏幕内框选滚动内容' : '拖动框选滚动内容'},
         });
         const session = {owner, workArea, selector};
         this._session = session;
@@ -124,20 +126,15 @@ export class LongshotController {
         session.status = new St.Label({text: '正在准备，暂不要滚动…', x_expand: true,
             y_align: Clutter.ActorAlign.CENTER});
         session.status.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        session.finish = this._addButton(hud, '完成', () => this._act(session, 'finish'));
+        session.cancel = createActionButton('pinshot-longshot-action', CANCEL_ACTION, () => this._act(session, 'cancel'));
+        session.cancel.can_focus = true;
+        session.finish = createActionButton('pinshot-longshot-action',
+            {id: 'finish', label: '完成长截图', iconName: CHECK_ICON, primary: true}, () => this._act(session, 'finish'));
         session.finish.reactive = false;
-        session.finish.can_focus = false;
-        session.cancel = this._addButton(hud, '取消', () => this._act(session, 'cancel'));
-        hud.insert_child_at_index(session.status, 0);
+        hud.add_child(session.status);
+        hud.add_child(session.cancel);
+        hud.add_child(session.finish);
         Main.layoutManager.uiGroup.add_child(hud);
-    }
-
-    _addButton(hud, label, clicked) {
-        const button = new St.Button({label, style_class: 'pinshot-longshot-button button',
-            reactive: true, can_focus: true, track_hover: true});
-        button.connect('clicked', clicked);
-        hud.add_child(button);
-        return button;
     }
 
     update(owner, height, warning) {

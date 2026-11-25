@@ -4,7 +4,7 @@ use std::os::fd::AsFd;
 use zbus::blocking::Connection;
 use zbus::zvariant::Fd;
 
-use crate::capture::ScreenshotSettings;
+use crate::capture::{ScreenshotSettings, StageRegion};
 use crate::error::{PinshotError, Result};
 use crate::protocol::{ActivePinInfo, FRONTEND_BUS_NAME, PinPayload};
 
@@ -27,6 +27,12 @@ trait Frontend1 {
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
+    fn choose_screenshot(
+        &self,
+        output_fd: Fd<'_>,
+        default_action: &str,
+        offer_longshot: bool,
+    ) -> zbus::Result<(f64, String, StageRegion)>;
     fn select_screenshot(
         &self,
         output_fd: Fd<'_>,
@@ -100,25 +106,29 @@ impl FrontendClient {
         Ok(items)
     }
 
-    /// 返回用户确认的动作和 PNG 缩放；旧版扩展仅支持入口指定的动作
+    /// 新版扩展可返回长截图选区，旧版扩展继续返回静态截图
     pub(crate) fn select_screenshot(
         &self,
         output: &File,
         default_action: &str,
-    ) -> Result<(f64, String)> {
-        let fd = Fd::from(output.as_fd());
-        let selection = self.proxy.select_screenshot(fd, default_action);
-        match selection {
-            Err(zbus::Error::MethodError(name, _, _))
-                if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" =>
-            {
-                let scale = self
-                    .proxy
-                    .capture_screenshot(Fd::from(output.as_fd()))
-                    .map_err(map_zbus_err)?;
-                Ok((scale, default_action.to_owned()))
+    ) -> Result<(f64, String, StageRegion)> {
+        let fd = || Fd::from(output.as_fd());
+        match self
+            .proxy
+            .choose_screenshot(fd(), default_action, cfg!(feature = "longshot"))
+        {
+            Err(ref error) if unknown_method(error) => {}
+            result => return result.map_err(map_zbus_err),
+        }
+        let empty = (0, 0, 0, 0);
+        match self.proxy.select_screenshot(fd(), default_action) {
+            Err(ref error) if unknown_method(error) => {
+                let scale = self.proxy.capture_screenshot(fd()).map_err(map_zbus_err)?;
+                Ok((scale, default_action.to_owned(), empty))
             }
-            result => result.map_err(map_zbus_err),
+            result => result
+                .map(|(scale, action)| (scale, action, empty))
+                .map_err(map_zbus_err),
         }
     }
 
@@ -152,6 +162,10 @@ impl FrontendClient {
             notify,
         })
     }
+}
+
+fn unknown_method(err: &zbus::Error) -> bool {
+    matches!(err, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod")
 }
 
 fn map_zbus_err(err: zbus::Error) -> PinshotError {

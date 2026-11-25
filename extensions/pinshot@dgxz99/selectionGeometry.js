@@ -58,6 +58,21 @@ export function resizeRegion([x, y, width, height], [hx, hy], [dx, dy], bounds, 
     return [x, y, right - x, bottom - y];
 }
 
+/** 只复用完全落在共享屏幕可录制范围内的原选区，不静默裁掉一部分 */
+export function initialRegionOnMonitor(region, monitor, bounds, minEdge) {
+    if (!region) {
+        return null;
+    }
+    const [stageX, stageY, width, height] = region;
+    const x = stageX - monitor.x;
+    const y = stageY - monitor.y;
+    if (width < minEdge || height < minEdge || x < bounds.left || y < bounds.top ||
+        x + width > bounds.right || y + height > bounds.bottom) {
+        return null;
+    }
+    return [x, y, width, height];
+}
+
 function overlapArea([x, y, width, height], {x: ax, y: ay, width: aw, height: ah}) {
     const horizontal = Math.max(0, Math.min(x + width, ax + aw) - Math.max(x, ax));
     const vertical = Math.max(0, Math.min(y + height, ay + ah) - Math.max(y, ay));

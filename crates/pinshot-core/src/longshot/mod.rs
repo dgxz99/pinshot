@@ -5,6 +5,7 @@ mod recorder;
 mod region;
 mod stitcher;
 mod stream;
+mod viewport;
 
 pub use desktop::record_desktop;
 pub use recorder::{Recording, record};

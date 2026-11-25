@@ -31,10 +31,11 @@ export default class PinshotExtension extends Extension {
             'pinshot-unghost-all': () => this._pinManager.unghostAll(),
         };
         this._registeredShortcuts = [];
-        for (const {key, command, args = []} of SHORTCUT_ACTIONS) {
+        for (const {key, command, args = [], allowInPopup = false} of SHORTCUT_ACTIONS) {
             const handler = handlers[key] ?? (() => firePinshot([command, ...args]));
-            const action = Main.wm.addKeybinding(key, settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
-                Shell.ActionMode.NORMAL, handler);
+            // 区域截图在冻结桌面前不关闭菜单，其他快捷键不抢菜单输入
+            const modes = allowInPopup ? Shell.ActionMode.NORMAL | Shell.ActionMode.POPUP : Shell.ActionMode.NORMAL;
+            const action = Main.wm.addKeybinding(key, settings, Meta.KeyBindingFlags.IGNORE_AUTOREPEAT, modes, handler);
             if (action !== Meta.KeyBindingAction.NONE) {
                 this._registeredShortcuts.push(key);
             } else {

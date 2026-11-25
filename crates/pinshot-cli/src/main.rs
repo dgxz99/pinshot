@@ -35,7 +35,7 @@ enum Commands {
     CapturePin,
     /// 区域截屏并在 Satty 标注，确认后复制图片
     CaptureEdit,
-    /// 框选后滚动，完成时拼接、复制并贴图
+    /// 框选并滚动拼接，完成时可复制、保存、贴图或标注
     #[cfg(feature = "longshot")]
     Longshot {
         /// 本次不使用记住的屏幕，重新打开系统选择器
@@ -167,26 +167,44 @@ fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
         #[cfg(not(feature = "longshot"))]
         Some(ScreenshotSelection::Longshot(_)) => anyhow::bail!("此版本未启用滚动长截图"),
     };
+    deliver_capture(&frontend, captured, PinKind::Screenshot)
+}
+
+fn deliver_capture(
+    frontend: &FrontendClient,
+    captured: CapturedImage,
+    kind: PinKind,
+) -> Result<()> {
     match captured.action {
         ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(
             &captured.png_bytes,
             captured.source_scale,
         )?),
-        ScreenshotAction::Pin => pin_screenshot(&frontend, captured),
-        ScreenshotAction::Edit => edit_screenshot(&frontend, &captured),
+        ScreenshotAction::Pin => pin_screenshot(frontend, captured, kind),
+        ScreenshotAction::Edit => edit_screenshot(frontend, &captured),
+        ScreenshotAction::Save => save_screenshot(
+            frontend,
+            &Config::load_or_init()?,
+            captured.png_bytes.as_slice(),
+        ),
     }
 }
 
-fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage) -> Result<()> {
+fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage, kind: PinKind) -> Result<()> {
+    let (title, message) = if kind == PinKind::Longshot {
+        ("滚动长截图", "已完成长截图并贴图")
+    } else {
+        ("区域截图", "已截图并贴图")
+    };
     let cfg = Config::load_or_init()?;
     let output = frontend.screenshot_settings()?;
     let store = PinStore::open_default()?;
     let record = store.add_png_entry(
         NewEntryRequest {
-            kind: PinKind::Screenshot,
+            kind,
             png_bytes: &captured.png_bytes,
             text_content: None,
-            title_preview: "区域截图".to_string(),
+            title_preview: title.to_string(),
             source_scale: captured.source_scale,
             active: true,
         },
@@ -197,7 +215,16 @@ fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage) -> Result<
     if let Err(error) = clipboard::copy_png_bytes(&captured.png_bytes, captured.source_scale) {
         notify::warn("Pinshot", &format!("截图已贴出，但复制失败：{error}"));
     }
-    finish_screenshot(&cfg, &output, &captured.png_bytes, "已截图并贴图")
+    finish_screenshot(&cfg, &output, &captured.png_bytes, message)
+}
+
+fn save_screenshot(frontend: &FrontendClient, cfg: &Config, png: impl std::io::Read) -> Result<()> {
+    let saved = frontend.screenshot_settings()?.export_png(cfg, png)?;
+    if cfg.general.notify_on_save {
+        notify::info("Pinshot 已保存原图", &saved.to_string_lossy());
+    }
+    println!("{}", saved.display());
+    Ok(())
 }
 
 fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Result<()> {
@@ -219,33 +246,19 @@ fn cmd_longshot(choose_screen: bool, initial_region: Option<capture::StageRegion
 
 #[cfg(feature = "longshot")]
 fn longshot(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
-    let cfg = Config::load_or_init()?;
     let frontend = FrontendClient::connect()?;
-    let output = frontend.screenshot_settings()?;
-    let Some(recording) = pinshot_core::longshot::record_desktop(choose_screen, initial_region)?
+    let Some((recording, action)) =
+        pinshot_core::longshot::record_desktop(choose_screen, initial_region)?
     else {
         return Ok(());
     };
-    let source_scale = recording.source_scale;
-    let png = recording.png_bytes()?;
+    let captured = CapturedImage {
+        action,
+        png_bytes: recording.png_bytes()?,
+        source_scale: recording.source_scale,
+    };
     drop(recording);
-    let store = PinStore::open_default()?;
-    let record = store.add_png_entry(
-        NewEntryRequest {
-            kind: PinKind::Longshot,
-            png_bytes: &png,
-            text_content: None,
-            title_preview: "滚动长截图".to_string(),
-            source_scale,
-            active: true,
-        },
-        &cfg.cache,
-    )?;
-    push_pin_to_frontend(&store, &record)?;
-    if let Err(error) = clipboard::copy_png_bytes(&png, source_scale) {
-        notify::warn("Pinshot", &format!("长图已贴出，但复制失败：{error}"));
-    }
-    finish_screenshot(&cfg, &output, &png, "已完成长截图并贴图")
+    deliver_capture(&frontend, captured, PinKind::Longshot)
 }
 
 fn finish_screenshot(
@@ -540,13 +553,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 .with_context(|| format!("未找到贴图: {id}"))?;
             let image = fs::File::open(&record.image_path)
                 .with_context(|| format!("读取原图失败: {}", record.image_path.display()))?;
-            let output = FrontendClient::connect()?.screenshot_settings()?;
-            let saved_path = output.export_png(&cfg, image)?;
-            if cfg.general.notify_on_save {
-                notify::info("pinshot 已保存原图", &saved_path.to_string_lossy());
-            }
-            println!("{}", saved_path.display());
-            Ok(())
+            save_screenshot(&FrontendClient::connect()?, &cfg, image)
         }
         InternalCommands::EditSatty { id } => edit_existing_pin(&id),
         InternalCommands::MarkClosed { id } => {

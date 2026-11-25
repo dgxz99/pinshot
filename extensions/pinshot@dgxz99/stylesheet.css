@@ -50,16 +50,31 @@
     spacing: 8px;
 }
 
-.pinshot-selection-toolbar {
-    padding: 4px;
-    spacing: 4px;
+.pinshot-selection-toolbar,
+.pinshot-longshot-hud {
+    padding: 3px 5px;
+    spacing: 2px;
 }
 
 .pinshot-action-button {
-    padding: 7px;
-    border-radius: 6px;
+    padding: 5px;
+    border-radius: 4px;
 }
 
-.pinshot-action-primary {
-    color: #b9d9ff;
+.pinshot-action-button:hover,
+.pinshot-action-button:focus {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.pinshot-action-button:active {
+    background-color: rgba(255, 255, 255, 0.22);
+}
+
+.pinshot-action-button:insensitive {
+    opacity: 0.35;
+}
+
+.pinshot-longshot-status {
+    padding: 0 6px;
+    font-size: 12px;
 }

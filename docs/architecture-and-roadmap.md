@@ -108,10 +108,10 @@
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `GetClipboardImageScale()` | 无 | `d` | 外部图片未携带原始倍率时：默认返回 `1.0`；启用屏幕像素 1:1 时返回指针所在显示器的倍率 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
-| `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 长图框选时带入普通截图的选区；只在它完全处于获准录制范围内时复用 |
+| `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 在授权屏内校验普通截图选区并直接显示录制工具条；选区无效时不进入录制 |
 | `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
 
-信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `finish` 或 `cancel`。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
+信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `copy`、`pin`、`edit`、`save` 或 `cancel`。Core 仍将旧版的 `finish` 视为贴图。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
 
 ### 3.2 Core 提供给前端的内部子命令（`pinshot internal ...`）
 前端通过短命子命令将图像处理、保存和历史写入交给 Core：
@@ -281,9 +281,9 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 - 拼接先在已拼接尾部搜索最匹配的位置，再用 RGB 采样复核。静止、已包含的回滚和位置不明确的帧不追加；只有确认重叠才追加底部新行。默认画布上限为 24,000 像素高和 192 MiB RGBA，以先到者为准。
 
 **桌面流程（`pinshot longshot`）**：
-1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。根据 Portal 返回的逻辑矩形在该屏幕内框选正文；短时抓取输入，确认最终选区后立即释放，框选和录制期间隐藏既有贴图。
-2. 录制时在固定选区外绘制不接收输入的边框，给向外取整的像素裁剪留出间隙。选区外的控制条显示当前高度与重叠告警，可主动完成或取消；滚动事件仍交给原应用。
-3. 先停止取帧与 Portal 会话，再结束持有 UI 的 D-Bus 连接，由扩展恢复旧贴图。确认完成后复用 Pinshot 的缓存、剪贴板、贴图和截图导出设置。
+1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。普通截图转入时校验原选区并直接开始录制；独立入口才在授权屏内框选并短时抓取输入。录制期间隐藏既有贴图。
+2. 录制时在固定选区外绘制不接收输入的边框，为向外取整的像素裁剪留出间隙。控制条优先贴在选区下方，放不下则移到另一侧，保证不盖住采集区。控制条显示高度与重叠告警；滚动事件仍交给原应用。
+3. 用户选择输出动作后，先关闭取帧和 Portal 会话，再由扩展清理控制条并恢复旧贴图。静态截图与长图共用输出流程；显式保存不依赖自动保存开关。
 
 ---
 

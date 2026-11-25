@@ -4,7 +4,7 @@ use tokio::sync::watch;
 use super::recorder::Recorder;
 use super::{LogicalRegion, Progress, Recording, ScreenSelection, failure, run_capture};
 use crate::Result;
-use crate::capture::StageRegion;
+use crate::capture::{ScreenshotAction, StageRegion};
 
 #[zbus::proxy(
     interface = "io.github.dgxz99.Pinshot.Frontend1",
@@ -33,12 +33,12 @@ trait LongshotFrontend {
     fn longshot_action(&self, action: &str) -> zbus::Result<()>;
 }
 
-/// 由 GNOME 扩展框选与控制共享的那块显示器，用户确认完成后返回成品
+/// 录制已授权屏幕上的选区，并返回拼接图与用户最后选择的输出动作
 /// `choose_screen` 为真时，本次不恢复上次授权的显示器
 pub fn record_desktop(
     choose_screen: bool,
     initial_region: Option<StageRegion>,
-) -> Result<Option<Recording>> {
+) -> Result<Option<(Recording, ScreenshotAction)>> {
     let selection = if choose_screen {
         ScreenSelection::Choose
     } else {
@@ -65,7 +65,7 @@ pub fn record_desktop(
         } else {
             frontend.select_longshot(x, y, width, height).await
         };
-        let (x, y, width, height) = selection.map_err(|error| failure("框选长图区域", error))?;
+        let (x, y, width, height) = selection.map_err(|error| failure("准备长截图选区", error))?;
         if width == 0 || height == 0 {
             return Ok(None);
         }
@@ -86,11 +86,15 @@ pub fn record_desktop(
             action = actions.next() => {
                 let action = action.ok_or_else(|| failure("接收长图操作", "扩展已断开连接"))?;
                 let args = action.args().map_err(|error| failure("接收长图操作", error))?;
-                match args.action {
-                    "finish" => recorder.finish().map(Some),
-                    "cancel" => Ok(None),
-                    action => Err(failure("接收长图操作", action)),
+                if args.action == "cancel" {
+                    return Ok(None);
                 }
+                let output = if args.action == "finish" {
+                    ScreenshotAction::Pin
+                } else {
+                    ScreenshotAction::from_wire(args.action)?
+                };
+                recorder.finish().map(|recording| Some((recording, output)))
             }
             result = publish_progress(&frontend, receiver) => {
                 result?;
@@ -113,7 +117,7 @@ pub fn record_desktop(
                 Ok(progress.flow())
             }) => {
                 result?;
-                recorder.finish().map(Some)
+                recorder.finish().map(|recording| Some((recording, ScreenshotAction::Pin)))
             }
         }
     })

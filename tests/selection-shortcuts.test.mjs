@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
-import {parseSelectionShortcut} from '../extensions/pinshot@dgxz99/selectionShortcuts.js';
+import {OUTPUT_ACTIONS, parseSelectionShortcut, SELECTION_ACTIONS} from '../extensions/pinshot@dgxz99/selectionShortcuts.js';
+
+test('both toolbars share ordered actions and package their SVGs with the extension', () => {
+    const actionIds = OUTPUT_ACTIONS.map(({id}) => id);
+    assert.deepEqual(actionIds, ['edit', 'pin', 'save', 'cancel', 'copy']);
+    assert.deepEqual(SELECTION_ACTIONS.map(({id}) => id), ['edit', 'pin', 'copy']);
+    const icons = new URL('../extensions/pinshot@dgxz99/icons/', import.meta.url);
+    for (const id of ['scrollshot', 'start', ...actionIds]) {
+        assert.match(readFileSync(new URL(`${id}-symbolic.svg`, icons), 'utf8'), /<svg[^>]+viewBox=/);
+    }
+});
 
 test('understands defaults and Ctrl+T with GTK modifier aliases', () => {
     assert.deepEqual(parseSelectionShortcut('p'), {key: 'p', control: false, shift: false, label: 'P'});

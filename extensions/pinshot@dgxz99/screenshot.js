@@ -3,13 +3,13 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {CANCEL_ACTION, CHECK_ICON, SCROLLSHOT_ICON} from './actionIcons.js';
+import {CANCEL_ACTION} from './actionIcons.js';
 import {CANCELLED_REGION, RegionSelector} from './regionSelector.js';
-import {parseSelectionShortcut, SELECTION_ACTIONS} from './selectionShortcuts.js';
+import {OUTPUT_ACTIONS, parseSelectionShortcut, SELECTION_ACTIONS} from './selectionShortcuts.js';
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-const LONGSHOT_ACTION = {id: 'longshot', label: '滚动长截图', gicon: SCROLLSHOT_ICON};
+const LONGSHOT_ACTION = {id: 'longshot', label: '滚动长截图', icon: 'scrollshot'};
 const CANCELLED = [0, '', CANCELLED_REGION];
 
 /** 避免在系统截图或录屏已经打开时叠加 Pinshot 框选 */
@@ -29,7 +29,7 @@ export class PinshotScreenshot {
         return this._session !== null;
     }
 
-    async capture(stream, owner, connection, defaultAction, offerLongshot = false) {
+    async capture(stream, owner, connection, defaultAction, {offerLongshot, offerSave}) {
         const initial = SELECTION_ACTIONS.find(({id}) => id === defaultAction);
         if (!initial && defaultAction !== null) {
             throw new Error('无效的截图默认动作');
@@ -39,13 +39,16 @@ export class PinshotScreenshot {
             actions.push(LONGSHOT_ACTION);
         }
         if (initial) {
-            for (const action of SELECTION_ACTIONS) {
-                const shortcut = parseSelectionShortcut(this._settings.get_strv(action.key)[0] ?? '');
+            for (const action of OUTPUT_ACTIONS) {
+                if (action.id === 'save' && !offerSave) {
+                    continue;
+                }
+                const shortcut = action.key ? parseSelectionShortcut(this._settings.get_strv(action.key)[0] ?? '') : null;
                 actions.push({...action, shortcut});
             }
+        } else {
+            actions.push(CANCEL_ACTION, {id: 'confirm', label: '确认', icon: 'copy'});
         }
-        actions.push(CANCEL_ACTION, {id: 'confirm', iconName: CHECK_ICON, primary: true,
-            label: initial ? `完成：${initial.label}` : '确认'});
         if (this.active || nativeScreenshotActive()) {
             throw new Error('请先完成或取消当前截图');
         }

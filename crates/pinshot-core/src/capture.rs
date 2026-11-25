@@ -18,6 +18,7 @@ pub enum ScreenshotAction {
     Copy,
     Pin,
     Edit,
+    Save,
 }
 
 impl ScreenshotAction {
@@ -26,14 +27,16 @@ impl ScreenshotAction {
             Self::Copy => "copy",
             Self::Pin => "pin",
             Self::Edit => "edit",
+            Self::Save => "save",
         }
     }
 
-    fn from_wire(action: &str) -> Result<Self> {
+    pub(crate) fn from_wire(action: &str) -> Result<Self> {
         match action {
             "copy" => Ok(Self::Copy),
             "pin" => Ok(Self::Pin),
             "edit" => Ok(Self::Edit),
+            "save" => Ok(Self::Save),
             _ => Err(PinshotError::Dbus(format!(
                 "前端返回无效的截图动作：{action}"
             ))),
@@ -206,6 +209,7 @@ mod tests {
             ScreenshotAction::Copy,
             ScreenshotAction::Pin,
             ScreenshotAction::Edit,
+            ScreenshotAction::Save,
         ] {
             assert_eq!(
                 ScreenshotAction::from_wire(action.as_str()).unwrap(),
@@ -213,7 +217,7 @@ mod tests {
             );
         }
         assert!(ScreenshotAction::from_wire("").is_err());
-        assert!(ScreenshotAction::from_wire("save").is_err());
+        assert!(ScreenshotAction::from_wire("finish").is_err());
     }
 
     #[test]

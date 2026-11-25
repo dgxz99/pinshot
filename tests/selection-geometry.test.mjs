@@ -50,6 +50,15 @@ test('toolbar stays on the monitor with more of the selection', () => {
     assert.equal(toolbarMonitor([910, 350, 130, 150], [first, second]), first);
 });
 
+test('recording toolbar stays entirely outside the captured region or reports no room', () => {
+    const options = {allowOverlap: false};
+    assert.deepEqual(toolbarPosition([100, 80, 500, 300], [270, 34], first, options), [330, 388]);
+    assert.deepEqual(toolbarPosition([200, 700, 600, 68], [270, 34], first, options), [530, 658]);
+    assert.deepEqual(toolbarPosition([0, 0, 500, 768], [270, 34], first, options), [508, 726]);
+    assert.equal(toolbarPosition([0, 0, 1024, 768], [270, 34], first, options), null);
+    assert.equal(toolbarPosition([300, 300, 500, 100], [1020, 34], first, options), null);
+});
+
 test('toolbar switches sides for edge selections and falls within a full display', () => {
     assert.deepEqual(toolbarPosition([50, 60, 300, 80], [170, 40], first), [180, 148]);
     assert.deepEqual(toolbarPosition([900, 720, 124, 48], [170, 40], first), [846, 672]);

@@ -1,9 +1,13 @@
-/** 同一组动作供截图工具条和框选快捷键设置使用，不注册全局绑定 */
-export const SELECTION_ACTIONS = [
-    {id: 'edit', key: 'selection-edit', label: '标注', iconName: 'document-edit-symbolic'},
-    {id: 'pin', key: 'selection-pin', label: '贴图', iconName: 'view-pin-symbolic'},
-    {id: 'copy', key: 'selection-copy', label: '复制', iconName: 'edit-copy-symbolic'},
+/** 普通截图与录制工具条共用输出动作和顺序；仅带设置键的动作可绑定框选快捷键 */
+export const OUTPUT_ACTIONS = [
+    {id: 'edit', key: 'selection-edit', label: '标注'},
+    {id: 'pin', key: 'selection-pin', label: '贴图'},
+    {id: 'save', label: '保存'},
+    {id: 'cancel', label: '取消'},
+    {id: 'copy', key: 'selection-copy', label: '复制'},
 ];
+
+export const SELECTION_ACTIONS = OUTPUT_ACTIONS.filter(({key}) => key);
 
 /** 解析 GTK 加速键格式中的框选按键；Enter 和 Esc 专用于确认与取消 */
 export function parseSelectionShortcut(accelerator) {

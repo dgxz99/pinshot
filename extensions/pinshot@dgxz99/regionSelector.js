@@ -23,8 +23,7 @@ export const CANCELLED_REGION = [0, 0, 0, 0];
 
 /** 保留可调整的选区，只有确认或取消才结束模态并归还输入 */
 export class RegionSelector {
-    constructor(area, {name, bounds, minEdge = 8, hint = null, background = null, actions, defaultAction,
-        initialRect = null}) {
+    constructor(area, {name, bounds, minEdge = 8, hint = null, background = null, actions, defaultAction}) {
         this._area = area;
         this._name = name;
         this._bounds = bounds ?? {left: 0, top: 0, right: area.width, bottom: area.height};
@@ -33,7 +32,7 @@ export class RegionSelector {
         this._background = background;
         this._actions = actions;
         this._defaultAction = defaultAction;
-        this._rect = initialRect;
+        this._rect = null;
         this._drag = null;
         this._grab = null;
     }
@@ -63,9 +62,8 @@ export class RegionSelector {
         }
         this._toolbar = this._createToolbar();
         this._layer.add_child(this._toolbar);
-        this._draw(this._rect);
+        this._draw(null);
         Main.layoutManager.uiGroup.add_child(this._layer);
-        this._showToolbar();
         this._grab = Main.pushModal(this._layer, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
         if (this._grab.is_revoked()) {
             this.close();

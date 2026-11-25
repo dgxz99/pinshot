@@ -236,18 +236,18 @@ export class PinshotDbusService {
     }
 
     async CaptureScreenshotAsync([handle], invocation) {
-        await this._captureScreenshot(handle, null, false, '(d)', invocation);
+        await this._captureScreenshot(handle, null, {}, '(d)', invocation);
     }
 
     async SelectScreenshotAsync([handle, defaultAction], invocation) {
-        await this._captureScreenshot(handle, defaultAction, false, '(ds)', invocation);
+        await this._captureScreenshot(handle, defaultAction, {}, '(ds)', invocation);
     }
 
     async ChooseScreenshotAsync([handle, defaultAction, offerLongshot], invocation) {
-        await this._captureScreenshot(handle, defaultAction, offerLongshot, '(ds(iiii))', invocation);
+        await this._captureScreenshot(handle, defaultAction, {offerLongshot, offerSave: true}, '(ds(iiii))', invocation);
     }
 
-    async _captureScreenshot(handle, defaultAction, offerLongshot, replyType, invocation) {
+    async _captureScreenshot(handle, defaultAction, options, replyType, invocation) {
         try {
             if (this._longshot.active) {
                 throw new Error('请先完成或取消长截图');
@@ -260,7 +260,7 @@ export class PinshotDbusService {
             let result;
             try {
                 result = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection(),
-                    defaultAction, offerLongshot);
+                    defaultAction, options);
             } finally {
                 stream.close(null);
             }

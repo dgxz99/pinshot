@@ -93,9 +93,12 @@ export function toolbarMonitor(rect, monitors) {
     return best;
 }
 
-/** 优先贴下缘、上缘和两侧；选区占满屏幕时才允许工具条与之重叠 */
-export function toolbarPosition([x, y, width, height], [tw, th], screen) {
+/** 优先贴下缘、上缘和两侧；录制时不允许工具条盖住采集区域 */
+export function toolbarPosition([x, y, width, height], [tw, th], screen, {allowOverlap = true} = {}) {
     const gap = 8;
+    if (!allowOverlap && (tw + 2 * gap > screen.width || th + 2 * gap > screen.height)) {
+        return null;
+    }
     const left = screen.x + gap;
     const top = screen.y + gap;
     const right = Math.max(left, screen.x + screen.width - tw - gap);
@@ -105,5 +108,5 @@ export function toolbarPosition([x, y, width, height], [tw, th], screen) {
     const candidates = [[alignX, y + height + gap], [alignX, y - th - gap],
         [x + width + gap, alignY], [x - tw - gap, alignY]];
     return candidates.find(([tx, ty]) => tx >= left && tx <= right && ty >= top && ty <= bottom) ??
-        [alignX, bottom];
+        (allowOverlap ? [alignX, bottom] : null);
 }

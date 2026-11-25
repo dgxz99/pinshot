@@ -569,9 +569,10 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
             let record = store
                 .get(&id)?
                 .with_context(|| format!("未找到贴图记录: {id}"))?;
-            clipboard::copy_png_file(&record.image_path, record.source_scale)?;
-            notify::info("pinshot", "已复制图片到剪贴板");
-            Ok(())
+            Ok(clipboard::copy_png_file(
+                &record.image_path,
+                record.source_scale,
+            )?)
         }
         InternalCommands::CopyText { id } => {
             let store = PinStore::open_default()?;
@@ -583,9 +584,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 .with_context(|| format!("贴图 {id} 不包含原始文本"))?;
             let text = fs::read_to_string(&text_path)
                 .with_context(|| format!("读取原文失败: {}", text_path.display()))?;
-            clipboard::copy_text(&text)?;
-            notify::info("pinshot", "已复制原始文本到剪贴板");
-            Ok(())
+            Ok(clipboard::copy_text(&text)?)
         }
         InternalCommands::SaveImage { id } => {
             let cfg = Config::load_or_init()?;

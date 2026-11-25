@@ -22,7 +22,7 @@ impl FixedBands {
         let margin = side_inset(width) * 4;
         let max_band = height / 3;
         let sample = |y: usize| y * pitch + margin..(y + 1) * pitch - margin;
-        let find = |rows: &mut dyn Iterator<Item = usize>| {
+        let find = |rows: &mut dyn Iterator<Item = usize>, corners: usize| {
             let mut count = 0;
             let mut flat_color = None;
             let mut has_detail = false;
@@ -39,7 +39,7 @@ impl FixedBands {
                 }
                 count += 1;
                 if count > max_band {
-                    return 0;
+                    return corners;
                 }
                 if !has_detail {
                     let color = flat_color.get_or_insert(&row[..3]);
@@ -50,12 +50,55 @@ impl FixedBands {
                         .any(|pixel| distinct_color(pixel, color));
                 }
             }
-            if has_detail { count } else { 0 }
+            if has_detail || corners > 0 {
+                count.max(corners)
+            } else {
+                0
+            }
         };
+        let leading_corners = corner_band(before, after, width, max_band, |offset| offset);
+        let trailing_corners =
+            corner_band(before, after, width, max_band, |offset| height - 1 - offset);
         Self {
-            leading: find(&mut (0..height)),
-            trailing: find(&mut (0..height).rev()),
+            leading: find(&mut (0..height), leading_corners),
+            trailing: find(&mut (0..height).rev(), trailing_corners),
         }
+    }
+}
+
+/// 圆角可能只出现在被排除出匹配的两侧；两边都出现固定的轮廓变化才单独保留这一段
+fn corner_band(
+    before: &[u8],
+    after: &[u8],
+    width: usize,
+    max_band: usize,
+    edge_row: impl Fn(usize) -> usize,
+) -> usize {
+    let inset = side_inset(width);
+    if inset < 2 {
+        return 0;
+    }
+    let reference = edge_row(max_band) * width * 4;
+    let side_changes = |row_start, side: Range<usize>| {
+        side.into_iter().any(|x| {
+            let offset = x * 4;
+            let edge = row_start + offset..row_start + offset + 4;
+            let straight = reference + offset..reference + offset + 4;
+            before[edge.clone()] == after[edge.clone()]
+                && before[straight.clone()] == after[straight.clone()]
+                && before[edge] != before[straight]
+        })
+    };
+    let length = (0..max_band)
+        .take_while(|&offset| {
+            let row_start = edge_row(offset) * width * 4;
+            side_changes(row_start, 0..inset) && side_changes(row_start, width - inset..width)
+        })
+        .count();
+    if (2..max_band).contains(&length) {
+        length
+    } else {
+        0
     }
 }
 

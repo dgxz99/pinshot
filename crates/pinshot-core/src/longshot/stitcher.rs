@@ -610,6 +610,53 @@ mod tests {
     }
 
     #[test]
+    fn rounded_container_edges_do_not_repeat_in_the_stitched_body() {
+        let texture = document(300, 27);
+        let background = Rgba([64, 64, 64, 255]);
+        let outside = Rgba([17, 17, 17, 255]);
+        let page = RgbaImage::from_fn(384, 300, |x, y| {
+            if (90..270).contains(&x) {
+                *texture.get_pixel(x % texture.width(), y)
+            } else {
+                background
+            }
+        });
+        let render = |top: u32, height: u32| {
+            RgbaImage::from_fn(page.width(), height, |x, y| {
+                // 圆角全部落在匹配时忽略的侧边区域，不能靠正文的色差找出
+                let edge_y = y.min(height - 1 - y);
+                let curve = 12_u32.saturating_sub((18 * edge_y).isqrt());
+                let distance = x.min(page.width() - 1 - x);
+                if distance < 2 + curve {
+                    outside
+                } else {
+                    *page.get_pixel(x, top + y)
+                }
+            })
+        };
+        let mut stitcher = Stitcher::new(render(60, 140), 1000).unwrap();
+        assert_eq!(
+            stitcher.push(&render(90, 140)).unwrap(),
+            Progress::Extended { length: 170 }
+        );
+        assert_eq!(
+            stitcher.push(&render(60, 140)).unwrap(),
+            Progress::Unchanged
+        );
+        assert_eq!(
+            stitcher.push(&render(31, 140)).unwrap(),
+            Progress::Extended { length: 199 }
+        );
+        let output = stitcher.finish().unwrap();
+        let expected = render(31, 199);
+        assert_eq!(output.dimensions(), expected.dimensions());
+        assert!(
+            output.as_raw() == expected.as_raw(),
+            "圆角只能出现在完整长图的两端"
+        );
+    }
+
+    #[test]
     fn does_not_use_a_fixed_header_as_overlap_when_the_body_jumps() {
         let page = document(310, 7);
         let first = code_card(&page, 0, true);

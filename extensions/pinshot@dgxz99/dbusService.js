@@ -57,6 +57,14 @@ const FRONTEND_IFACE_XML = `
       <arg type="d" direction="out" name="scale"/>
       <arg type="s" direction="out" name="action"/>
     </method>
+    <method name="ChooseCapture">
+      <arg type="h" direction="in" name="output_fd"/>
+      <arg type="s" direction="in" name="default_action"/>
+      <arg type="as" direction="in" name="offered_actions"/>
+      <arg type="d" direction="out" name="scale"/>
+      <arg type="s" direction="out" name="action"/>
+      <arg type="(iiii)" direction="out" name="stage_region"/>
+    </method>
     <method name="ChooseScreenshot">
       <arg type="h" direction="in" name="output_fd"/>
       <arg type="s" direction="in" name="default_action"/>
@@ -86,8 +94,20 @@ const FRONTEND_IFACE_XML = `
       <arg type="u" direction="out" name="width"/>
       <arg type="u" direction="out" name="height"/>
     </method>
+    <method name="SelectLongshotWithAxis">
+      <arg type="i" direction="in" name="monitor_x"/>
+      <arg type="i" direction="in" name="monitor_y"/>
+      <arg type="i" direction="in" name="monitor_width"/>
+      <arg type="i" direction="in" name="monitor_height"/>
+      <arg type="(iiii)" direction="in" name="stage_region"/>
+      <arg type="s" direction="in" name="axis"/>
+      <arg type="u" direction="out" name="x"/>
+      <arg type="u" direction="out" name="y"/>
+      <arg type="u" direction="out" name="width"/>
+      <arg type="u" direction="out" name="height"/>
+    </method>
     <method name="UpdateLongshot">
-      <arg type="u" direction="in" name="height"/>
+      <arg type="u" direction="in" name="length"/>
       <arg type="b" direction="in" name="warning"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
@@ -210,28 +230,36 @@ export class PinshotDbusService {
     }
 
     async SelectLongshotAsync(geometry, invocation) {
-        await this._selectLongshot(geometry, null, invocation);
+        await this._selectLongshot(geometry, null, 'vertical', invocation);
     }
 
     async SelectLongshotRegionAsync([x, y, width, height, initialRegion], invocation) {
-        await this._selectLongshot([x, y, width, height], initialRegion, invocation);
+        await this._selectLongshot([x, y, width, height], initialRegion, 'vertical', invocation);
     }
 
-    async _selectLongshot(geometry, initialRegion, invocation) {
+    async SelectLongshotWithAxisAsync([x, y, width, height, region, axis], invocation) {
+        const initialRegion = region.every(value => value === 0) ? null : region;
+        await this._selectLongshot([x, y, width, height], initialRegion, axis, invocation);
+    }
+
+    async _selectLongshot(geometry, initialRegion, axis, invocation) {
         try {
+            if (axis !== 'vertical' && axis !== 'horizontal') {
+                throw new Error('无效的长截图拼接方向');
+            }
             if (this._screenshot.active || nativeScreenshotActive()) {
                 throw new Error('请先完成或取消当前截图或录屏');
             }
             const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(),
-                geometry, initialRegion);
+                geometry, initialRegion, axis);
             invocation.return_value(new GLib.Variant('(uuuu)', rect));
         } catch (error) {
             invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, error.message);
         }
     }
 
-    UpdateLongshotAsync([height, warning], invocation) {
-        const updated = this._longshot.update(invocation.get_sender(), height, warning);
+    UpdateLongshotAsync([length, warning], invocation) {
+        const updated = this._longshot.update(invocation.get_sender(), length, warning);
         invocation.return_value(new GLib.Variant('(b)', [updated]));
     }
 
@@ -244,7 +272,13 @@ export class PinshotDbusService {
     }
 
     async ChooseScreenshotAsync([handle, defaultAction, offerLongshot], invocation) {
-        await this._captureScreenshot(handle, defaultAction, {offerLongshot, offerSave: true}, '(ds(iiii))', invocation);
+        const offeredActions = offerLongshot ? ['longshot'] : [];
+        await this.ChooseCaptureAsync([handle, defaultAction, offeredActions], invocation);
+    }
+
+    async ChooseCaptureAsync([handle, defaultAction, offeredActions], invocation) {
+        const options = {offeredActions, offerSave: true};
+        await this._captureScreenshot(handle, defaultAction, options, '(ds(iiii))', invocation);
     }
 
     async _captureScreenshot(handle, defaultAction, options, replyType, invocation) {

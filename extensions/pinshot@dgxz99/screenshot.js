@@ -9,7 +9,10 @@ import {OUTPUT_ACTIONS, parseSelectionShortcut, SELECTION_ACTIONS} from './selec
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-const LONGSHOT_ACTION = {id: 'longshot', label: '滚动长截图', icon: 'scrollshot'};
+const RECORD_ACTIONS = [
+    {id: 'longshot', label: '纵向长截图', icon: 'scrollshot'},
+    {id: 'longshot-horizontal', label: '横向长截图', icon: 'scrollshot-horizontal'},
+];
 const CANCELLED = [0, '', CANCELLED_REGION];
 
 /** 避免在系统截图或录屏已经打开时叠加 Pinshot 框选 */
@@ -29,15 +32,13 @@ export class PinshotScreenshot {
         return this._session !== null;
     }
 
-    async capture(stream, owner, connection, defaultAction, {offerLongshot, offerSave}) {
+    async capture(stream, owner, connection, defaultAction, {offeredActions = [], offerSave}) {
         const initial = SELECTION_ACTIONS.find(({id}) => id === defaultAction);
         if (!initial && defaultAction !== null) {
             throw new Error('无效的截图默认动作');
         }
-        const actions = [];
-        if (offerLongshot) {
-            actions.push(LONGSHOT_ACTION);
-        }
+        const recordingActions = RECORD_ACTIONS.filter(({id}) => offeredActions.includes(id));
+        const actions = [...recordingActions];
         if (initial) {
             for (const action of OUTPUT_ACTIONS) {
                 if (action.id === 'save' && !offerSave) {
@@ -81,7 +82,7 @@ export class PinshotScreenshot {
                 return CANCELLED;
             }
             const {rect, action} = selection;
-            if (action === 'longshot') {
+            if (recordingActions.some(({id}) => id === action)) {
                 return [0, action, rect];
             }
             await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);

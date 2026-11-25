@@ -102,14 +102,16 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
-| `ChooseScreenshot(output_fd, default_action, offer_longshot)` | `h`, `s`, `b` | `d`, `s`, `(iiii)` | 静态截图写入 PNG，返回纹理倍率和动作；切换到长图时不写 PNG，返回 `0`、`longshot` 和桌面逻辑选区。取消返回 `0` 与空动作 |
+| `ChooseCapture(output_fd, default_action, offered_actions)` | `h`, `s`, `as` | `d`, `s`, `(iiii)` | 静态截图写入 PNG；连续采集返回 `0`、动作（`longshot` 或 `longshot-horizontal`）与原选区。仅展示 CLI 声明支持的采集动作。取消返回 `0` 与空动作 |
+| `ChooseScreenshot(output_fd, default_action, offer_longshot)` | `h`, `s`, `b` | `d`, `s`, `(iiii)` | 兼容入口，只提供纵向长截图 |
 | `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 兼容旧版 CLI，只提供静态截图动作；取消返回 `0` 与空字符串 |
 | `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
 | `GetClipboardImageScale()` | 无 | `d` | 外部图片未携带原始倍率时：默认返回 `1.0`；启用屏幕像素 1:1 时返回指针所在显示器的倍率 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 在授权屏内校验普通截图选区并直接显示录制工具条；选区无效时不进入录制 |
-| `UpdateLongshot(height, warning)` | `u`, `b` | `b` | 仅接受本次录制连接发来的高度与重叠告警 |
+| `SelectLongshotWithAxis(monitor_x, monitor_y, monitor_width, monitor_height, stage_region, axis)` | `i`, `i`, `i`, `i`, `(iiii)`, `s` | `u`, `u`, `u`, `u` | 按指定轴显示录制工具条；全零选区表示独立入口，仍需框选 |
+| `UpdateLongshot(length, warning)` | `u`, `b` | `b` | 仅接受录制连接发来的拼接轴长度与重叠告警 |
 
 信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `copy`、`pin`、`edit`、`save` 或 `cancel`。Core 仍将旧版的 `finish` 视为贴图。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
 
@@ -277,12 +279,12 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 ```
 
 - `--region` 是相对所共享显示器左上角的逻辑坐标 `x,y,宽,高`。请按实际位置调整，避开固定页眉、导航栏、滚动条和浮层；省略时使用整屏。裁剪根据实际视频尺寸换算，分数坐标的边界向外取整；范围无效时不会生成文件。
-- 终端看到「开始滚动」后再慢慢向下滚动。找不到可靠重叠时，回滚到上次匹配的位置再继续。计时结束或达到尺寸上限会写出 PNG，已有文件不覆盖；按 `Ctrl+C` 或停止共享会丢弃本次结果。
-- 拼接先在已拼接尾部搜索最匹配的位置，再用 RGB 采样复核。静止、已包含的回滚和位置不明确的帧不追加；只有确认重叠才追加底部新行。默认画布上限为 24,000 像素高和 192 MiB RGBA，以先到者为准。
+- 终端看到「开始滚动」后再沿所选轴慢慢滚动（默认纵向，`--horizontal` 切换横向）。找不到可靠重叠时，回滚到上次匹配的位置再继续。计时结束或达到尺寸上限会写出 PNG，已有文件不覆盖；按 `Ctrl+C` 或停止共享会丢弃本次结果。
+- 拼接在上次匹配位置附近搜索，再用 RGB 采样复核。只有确认重叠才向拼接轴两端补齐新内容；静止、已纳入画布或有歧义的帧不改变画布。横向复用同一算法，对输入和最终输出进行转置。拼接轴上限为 24,000 像素，画布上限为 192 MiB RGBA，以先到者为准。
 
 **桌面流程（`pinshot longshot`）**：
 1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。普通截图转入时校验原选区并直接开始录制；独立入口才在授权屏内框选并短时抓取输入。录制期间隐藏既有贴图。
-2. 录制时在固定选区外绘制不接收输入的边框，为向外取整的像素裁剪留出间隙。控制条优先贴在选区下方，放不下则移到另一侧，保证不盖住采集区。控制条显示高度与重叠告警；滚动事件仍交给原应用。
+2. 录制时在固定选区外绘制不接收输入的边框，为向外取整的像素裁剪留出间隙。控制条优先贴在选区下方，放不下则移到另一侧，保证不盖住采集区。控制条显示拼接轴长度与重叠告警；滚动事件仍交给原应用。
 3. 用户选择输出动作后，先关闭取帧和 Portal 会话，再由扩展清理控制条并恢复旧贴图。静态截图与长图共用输出流程；显式保存不依赖自动保存开关。
 
 ---

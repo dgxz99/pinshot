@@ -53,7 +53,7 @@ export class LongshotController {
         return this._session !== null;
     }
 
-    async select(owner, connection, geometry, initialRegion) {
+    async select(owner, connection, geometry, initialRegion, axis) {
         if (this.active) {
             throw new Error('已有长截图正在运行');
         }
@@ -70,6 +70,7 @@ export class LongshotController {
         if (workArea.height < HUD_SPACE + MIN_EDGE + OUTLINE_MARGIN || workArea.width < 280) {
             throw new Error('共享显示器的可用区域太小');
         }
+        const direction = axis === 'horizontal' ? '横向' : '纵向';
         const left = workArea.x - monitor.x;
         const top = workArea.y - monitor.y;
         const bottom = top + workArea.height - HUD_SPACE;
@@ -87,10 +88,10 @@ export class LongshotController {
             selector = new RegionSelector(monitor, {
                 name: 'pinshot-longshot-selector', bounds, minEdge: MIN_EDGE,
                 actions: [CANCEL_ACTION, {id: 'start', label: '开始录制'}], defaultAction: 'start',
-                hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24, text: '拖动框选滚动内容'},
+                hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24, text: `拖动框选${direction}滚动的内容`},
             });
         }
-        const session = {owner, workArea, selector};
+        const session = {owner, workArea, selector, direction};
         this._session = session;
         try {
             this._pinManager.setSystemHidden(true);
@@ -156,13 +157,13 @@ export class LongshotController {
         button.opacity = enabled ? 255 : 90;
     }
 
-    update(owner, height, warning) {
+    update(owner, length, warning) {
         const session = this._session;
         if (session?.owner !== owner || !session.hud) {
             return false;
         }
-        if (!session.ending && height > 0) {
-            session.status.text = warning ? `${height} px · 回滚后慢滚` : `${height} px · 可以滚动`;
+        if (!session.ending && length > 0) {
+            session.status.text = warning ? `${length} px · 回滚后慢滚` : `${length} px · ${session.direction}滚动`;
             for (const button of session.buttons) {
                 this._setButtonEnabled(button, true);
             }

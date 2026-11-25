@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use pinshot_core::annotate;
+#[cfg(feature = "longshot")]
+use pinshot_core::capture::ScrollAxis;
 use pinshot_core::capture::{self, CapturedImage, ScreenshotAction, ScreenshotSelection};
 use pinshot_core::clipboard::{self, ClipboardContent};
 use pinshot_core::protocol::PinKind;
@@ -41,6 +43,9 @@ enum Commands {
         /// 本次不使用记住的屏幕，重新打开系统选择器
         #[arg(long)]
         choose_screen: bool,
+        /// 沿水平方向拼接；省略时沿纵向拼接
+        #[arg(long)]
+        horizontal: bool,
     },
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
@@ -79,6 +84,9 @@ enum InternalCommands {
         /// 所选显示器内的逻辑坐标 x,y,宽,高；省略时使用整屏
         #[arg(long)]
         region: Option<pinshot_core::longshot::LogicalRegion>,
+        /// 沿水平方向拼接；省略时沿纵向拼接
+        #[arg(long)]
+        horizontal: bool,
         /// 从首帧开始计时（1–120 秒）
         #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u16).range(1..=120))]
         seconds: u16,
@@ -112,7 +120,10 @@ fn main() -> Result<()> {
         Commands::CapturePin => cmd_capture(ScreenshotAction::Pin),
         Commands::CaptureEdit => cmd_capture(ScreenshotAction::Edit),
         #[cfg(feature = "longshot")]
-        Commands::Longshot { choose_screen } => cmd_longshot(choose_screen, None),
+        Commands::Longshot {
+            choose_screen,
+            horizontal,
+        } => cmd_longshot(choose_screen, None, scroll_axis(horizontal)),
         Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::ToggleHide => cmd_toggle_hide(),
         Commands::UnghostAll => cmd_unghost_all(),
@@ -163,9 +174,11 @@ fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
         None => return Ok(()),
         Some(ScreenshotSelection::Image(captured)) => captured,
         #[cfg(feature = "longshot")]
-        Some(ScreenshotSelection::Longshot(region)) => return cmd_longshot(false, Some(region)),
+        Some(ScreenshotSelection::Longshot(region, axis)) => {
+            return cmd_longshot(false, Some(region), axis);
+        }
         #[cfg(not(feature = "longshot"))]
-        Some(ScreenshotSelection::Longshot(_)) => anyhow::bail!("此版本未启用滚动长截图"),
+        Some(ScreenshotSelection::Longshot(..)) => anyhow::bail!("此版本未启用滚动长截图"),
     };
     deliver_capture(&frontend, captured, PinKind::Screenshot)
 }
@@ -238,17 +251,34 @@ fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Resul
 }
 
 #[cfg(feature = "longshot")]
-fn cmd_longshot(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
-    longshot(choose_screen, initial_region).inspect_err(|error| {
+fn scroll_axis(horizontal: bool) -> ScrollAxis {
+    if horizontal {
+        ScrollAxis::Horizontal
+    } else {
+        ScrollAxis::Vertical
+    }
+}
+
+#[cfg(feature = "longshot")]
+fn cmd_longshot(
+    choose_screen: bool,
+    initial_region: Option<capture::StageRegion>,
+    axis: ScrollAxis,
+) -> Result<()> {
+    longshot(choose_screen, initial_region, axis).inspect_err(|error| {
         notify::warn("Pinshot 长截图", &format!("{error:#}"));
     })
 }
 
 #[cfg(feature = "longshot")]
-fn longshot(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
+fn longshot(
+    choose_screen: bool,
+    initial_region: Option<capture::StageRegion>,
+    axis: ScrollAxis,
+) -> Result<()> {
     let frontend = FrontendClient::connect()?;
     let Some((recording, action)) =
-        pinshot_core::longshot::record_desktop(choose_screen, initial_region)?
+        pinshot_core::longshot::record_desktop(choose_screen, initial_region, axis)?
     else {
         return Ok(());
     };
@@ -471,6 +501,7 @@ fn cmd_probe_longshot(frames: u32) -> Result<()> {
 #[cfg(feature = "longshot")]
 fn cmd_record_longshot(
     region: Option<pinshot_core::longshot::LogicalRegion>,
+    axis: ScrollAxis,
     seconds: u16,
     output: &std::path::Path,
 ) -> Result<()> {
@@ -483,20 +514,30 @@ fn cmd_record_longshot(
         "输出文件已存在: {}",
         output.display()
     );
-    eprintln!("请选择显示器；看到「开始滚动」后再向下滚动，Ctrl+C 取消");
+    let (direction, dimension) = match axis {
+        ScrollAxis::Vertical => ("纵向", "高度"),
+        ScrollAxis::Horizontal => ("横向", "宽度"),
+    };
+    eprintln!("请选择显示器；看到「开始滚动」后再{direction}滚动，Ctrl+C 取消");
     let mut warned = false;
-    let mut first_height = None;
-    let recording = record(region, duration, |progress| match progress {
-        Progress::Started { height } => {
-            first_height = Some(height);
-            eprintln!("开始滚动，首帧高度 {height} px，{seconds} 秒后结束");
+    let mut extended = false;
+    let recording = record(region, axis, duration, |progress| match progress {
+        Progress::Started { length } => {
+            eprintln!("开始滚动，首帧{dimension} {length} px，{seconds} 秒后结束");
         }
         Progress::Unmatched if !warned => {
             warned = true;
-            eprintln!("未找到可靠重叠，请回滚到上次匹配的位置，再慢慢向下滚动");
+            eprintln!("未找到可靠重叠，请回到上次匹配的位置，再慢慢{direction}滚动");
         }
-        Progress::Unchanged | Progress::Extended { .. } => warned = false,
-        Progress::LimitReached { height } => eprintln!("已达到高度上限 {height} px，结束采集"),
+        Progress::Unchanged => warned = false,
+        Progress::Extended { .. } => {
+            warned = false;
+            extended = true;
+        }
+        Progress::LimitReached { length } => {
+            eprintln!("已达到{dimension}上限 {length} px，结束采集");
+            extended = true;
+        }
         Progress::Unmatched => {}
     })?;
     let Some(recording) = recording else {
@@ -504,7 +545,7 @@ fn cmd_record_longshot(
         return Ok(());
     };
     let (width, height) = recording.dimensions();
-    if first_height == Some(height) {
+    if !extended {
         eprintln!("没有追加新的内容，PNG 只包含首帧");
     }
     recording.save_png(output)?;
@@ -519,9 +560,10 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
         #[cfg(feature = "longshot")]
         InternalCommands::RecordLongshot {
             region,
+            horizontal,
             seconds,
             output,
-        } => cmd_record_longshot(region, seconds, &output),
+        } => cmd_record_longshot(region, scroll_axis(horizontal), seconds, &output),
         InternalCommands::CopyImage { id } => {
             let store = PinStore::open_default()?;
             let record = store

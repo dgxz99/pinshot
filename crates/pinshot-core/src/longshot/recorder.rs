@@ -8,9 +8,19 @@ use image::{ExtendedColorType, ImageEncoder, RgbaImage};
 use super::region::{LogicalRegion, PixelRegion};
 use super::stitcher::{Progress, Stitcher};
 use super::{Monitor, failure, run_capture};
+use crate::capture::ScrollAxis;
 use crate::{PinshotError, Result};
 
-const MAX_HEIGHT: u32 = 24_000;
+const MAX_LENGTH: u32 = 24_000;
+
+fn orient_for_stitching(frame: RgbaImage, axis: ScrollAxis) -> RgbaImage {
+    match axis {
+        ScrollAxis::Vertical => frame,
+        ScrollAxis::Horizontal => {
+            RgbaImage::from_fn(frame.height(), frame.width(), |x, y| *frame.get_pixel(y, x))
+        }
+    }
+}
 
 /// 已结束的滚动录制，包含最终拼接像素和显示器缩放比例
 pub struct Recording {
@@ -59,11 +69,12 @@ impl Recording {
 /// 共享单个屏幕，从首帧起定时采集；取消或共享被撤销时丢弃中间画布
 pub fn record(
     region: Option<LogicalRegion>,
+    axis: ScrollAxis,
     duration: Duration,
     mut update: impl FnMut(Progress),
 ) -> Result<Option<Recording>> {
     run_capture(None, async |_, screen| {
-        let mut recorder = Recorder::new(screen.monitor, region);
+        let mut recorder = Recorder::new(screen.monitor, region, axis);
         screen
             .read(Some(duration), |frame| {
                 let progress = recorder.push(frame)?;
@@ -80,16 +91,18 @@ pub(super) struct Recorder {
     monitor: Monitor,
     region: Option<LogicalRegion>,
     crop: Option<PixelRegion>,
+    axis: ScrollAxis,
     stitcher: Option<Stitcher>,
     source_scale: f64,
 }
 
 impl Recorder {
-    pub(super) fn new(monitor: Monitor, region: Option<LogicalRegion>) -> Self {
+    pub(super) fn new(monitor: Monitor, region: Option<LogicalRegion>, axis: ScrollAxis) -> Self {
         Self {
             monitor,
             region,
             crop: None,
+            axis,
             stitcher: None,
             source_scale: 1.0,
         }
@@ -115,15 +128,16 @@ impl Recorder {
         } else {
             frame
         };
+        let frame = orient_for_stitching(frame, self.axis);
         if let Some(stitcher) = &mut self.stitcher {
             return stitcher.push(&frame);
         }
-        let first = Stitcher::new(frame, MAX_HEIGHT)?;
-        let height = first.height();
+        let first = Stitcher::new(frame, MAX_LENGTH)?;
+        let length = first.height();
         let progress = if first.is_full() {
-            Progress::LimitReached { height }
+            Progress::LimitReached { length }
         } else {
-            Progress::Started { height }
+            Progress::Started { length }
         };
         self.stitcher = Some(first);
         Ok(progress)
@@ -134,7 +148,8 @@ impl Recorder {
             .stitcher
             .ok_or_else(|| failure("生成长图", "没有接收到首帧"))?;
         Ok(Recording {
-            image: stitcher.finish()?,
+            // 转置是自身的逆操作，横向成品恢复正常阅读方向
+            image: orient_for_stitching(stitcher.finish()?, self.axis),
             source_scale: self.source_scale,
         })
     }
@@ -153,6 +168,45 @@ impl Progress {
 mod tests {
     use super::*;
     use image::Rgba;
+
+    #[test]
+    fn horizontal_recording_extends_both_sides_and_restores_image_orientation() {
+        let page = RgbaImage::from_fn(310, 95, |x, y| {
+            let bytes = (x * 97 + y)
+                .wrapping_mul(0x45d9f3b)
+                .rotate_left(11)
+                .to_le_bytes();
+            Rgba([bytes[0], bytes[1], bytes[2], 255])
+        });
+        let mut recorder = Recorder::new(
+            Monitor {
+                logical_size: Some((120, 95)),
+                logical_position: None,
+            },
+            Some(LogicalRegion {
+                x: 10,
+                y: 5,
+                width: 90,
+                height: 80,
+            }),
+            ScrollAxis::Horizontal,
+        );
+        for (left, expected) in [
+            (100, Progress::Started { length: 90 }),
+            (142, Progress::Extended { length: 132 }),
+            (100, Progress::Unchanged),
+            (62, Progress::Extended { length: 170 }),
+            (26, Progress::Extended { length: 206 }),
+        ] {
+            let frame = image::imageops::crop_imm(&page, left, 0, 120, 95).to_image();
+            assert_eq!(recorder.push(frame).unwrap(), expected);
+        }
+        let recording = recorder.finish().unwrap();
+        assert_eq!(
+            recording.image,
+            image::imageops::crop_imm(&page, 36, 5, 206, 80).to_image()
+        );
+    }
 
     #[test]
     fn writes_png_without_overwriting_existing_output() {

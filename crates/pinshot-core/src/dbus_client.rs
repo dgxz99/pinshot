@@ -27,6 +27,12 @@ trait Frontend1 {
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
+    fn choose_capture(
+        &self,
+        output_fd: Fd<'_>,
+        default_action: &str,
+        offered_actions: &[&str],
+    ) -> zbus::Result<(f64, String, StageRegion)>;
     fn choose_screenshot(
         &self,
         output_fd: Fd<'_>,
@@ -113,6 +119,18 @@ impl FrontendClient {
         default_action: &str,
     ) -> Result<(f64, String, StageRegion)> {
         let fd = || Fd::from(output.as_fd());
+        let offered_actions: &[&str] = if cfg!(feature = "longshot") {
+            &["longshot", "longshot-horizontal"]
+        } else {
+            &[]
+        };
+        match self
+            .proxy
+            .choose_capture(fd(), default_action, offered_actions)
+        {
+            Err(ref error) if unknown_method(error) => {}
+            result => return result.map_err(map_zbus_err),
+        }
         match self
             .proxy
             .choose_screenshot(fd(), default_action, cfg!(feature = "longshot"))
@@ -164,7 +182,7 @@ impl FrontendClient {
     }
 }
 
-fn unknown_method(err: &zbus::Error) -> bool {
+pub(crate) fn unknown_method(err: &zbus::Error) -> bool {
     matches!(err, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod")
 }
 

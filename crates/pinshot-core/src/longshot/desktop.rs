@@ -4,7 +4,8 @@ use tokio::sync::watch;
 use super::recorder::Recorder;
 use super::{LogicalRegion, Progress, Recording, ScreenSelection, failure, run_capture};
 use crate::Result;
-use crate::capture::{ScreenshotAction, StageRegion};
+use crate::capture::{ScreenshotAction, ScrollAxis, StageRegion};
+use crate::dbus_client::unknown_method;
 
 #[zbus::proxy(
     interface = "io.github.dgxz99.Pinshot.Frontend1",
@@ -28,7 +29,16 @@ trait LongshotFrontend {
         height: i32,
         stage_region: StageRegion,
     ) -> zbus::Result<(u32, u32, u32, u32)>;
-    fn update_longshot(&self, height: u32, warning: bool) -> zbus::Result<bool>;
+    fn select_longshot_with_axis(
+        &self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        stage_region: StageRegion,
+        axis: &str,
+    ) -> zbus::Result<(u32, u32, u32, u32)>;
+    fn update_longshot(&self, length: u32, warning: bool) -> zbus::Result<bool>;
     #[zbus(signal)]
     fn longshot_action(&self, action: &str) -> zbus::Result<()>;
 }
@@ -38,6 +48,7 @@ trait LongshotFrontend {
 pub fn record_desktop(
     choose_screen: bool,
     initial_region: Option<StageRegion>,
+    axis: ScrollAxis,
 ) -> Result<Option<(Recording, ScreenshotAction)>> {
     let selection = if choose_screen {
         ScreenSelection::Choose
@@ -58,12 +69,32 @@ pub fn record_desktop(
             .receive_longshot_action()
             .await
             .map_err(|error| failure("监听长图操作", error))?;
-        let selection = if let Some(region) = initial_region {
-            frontend
-                .select_longshot_region(x, y, width, height, region)
-                .await
-        } else {
-            frontend.select_longshot(x, y, width, height).await
+        let selection = match (axis, initial_region) {
+            (ScrollAxis::Horizontal, region) => {
+                let result = frontend
+                    .select_longshot_with_axis(
+                        x,
+                        y,
+                        width,
+                        height,
+                        region.unwrap_or_default(),
+                        "horizontal",
+                    )
+                    .await;
+                if result.as_ref().is_err_and(unknown_method) {
+                    return Err(failure(
+                        "准备横向长截图",
+                        "请更新 GNOME Shell 扩展并重新登录",
+                    ));
+                }
+                result
+            }
+            (ScrollAxis::Vertical, Some(region)) => {
+                frontend
+                    .select_longshot_region(x, y, width, height, region)
+                    .await
+            }
+            (ScrollAxis::Vertical, None) => frontend.select_longshot(x, y, width, height).await,
         };
         let (x, y, width, height) = selection.map_err(|error| failure("准备长截图选区", error))?;
         if width == 0 || height == 0 {
@@ -77,6 +108,7 @@ pub fn record_desktop(
                 width,
                 height,
             }),
+            axis,
         );
         let (sender, receiver) = watch::channel((0, false));
         // 框选与控制条由当前 D-Bus 连接持有。退出 run_capture 时，先停止采帧，
@@ -104,7 +136,7 @@ pub fn record_desktop(
                 let progress = recorder.push(frame)?;
                 sender.send_if_modified(|state| {
                     let next = match progress {
-                        Progress::Started { height } | Progress::Extended { height } | Progress::LimitReached { height } => (height, false),
+                        Progress::Started { length } | Progress::Extended { length } | Progress::LimitReached { length } => (length, false),
                         Progress::Unchanged => (state.0, false),
                         Progress::Unmatched => (state.0, true),
                     };
@@ -128,9 +160,9 @@ async fn publish_progress(
     mut states: watch::Receiver<(u32, bool)>,
 ) -> Result<()> {
     while states.changed().await.is_ok() {
-        let (height, warning) = *states.borrow_and_update();
+        let (length, warning) = *states.borrow_and_update();
         let updated = frontend
-            .update_longshot(height, warning)
+            .update_longshot(length, warning)
             .await
             .map_err(|error| failure("更新长图控制条", error))?;
         if !updated {

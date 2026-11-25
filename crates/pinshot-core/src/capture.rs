@@ -47,10 +47,18 @@ impl ScreenshotAction {
 /// 虚拟桌面逻辑坐标 (x, y, width, height)，可用于把选区交给长截图
 pub type StageRegion = (i32, i32, i32, i32);
 
+/// 一次长截图只沿一个轴拼接，允许向该轴的两端扩展
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollAxis {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
 /// 区域截图确认后，要么交付一张静态 PNG，要么用原选区切换到长截图
 pub enum ScreenshotSelection {
     Image(CapturedImage),
-    Longshot(StageRegion),
+    Longshot(StageRegion, ScrollAxis),
 }
 
 /// 区域截屏成功后的输出图像和交付动作
@@ -155,9 +163,14 @@ pub fn capture_interactive_region(
     let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
     let (source_scale, action, region) =
         frontend.select_screenshot(&file, default_action.as_str())?;
-    if action == "longshot" {
+    let axis = match action.as_str() {
+        "longshot" => Some(ScrollAxis::Vertical),
+        "longshot-horizontal" => Some(ScrollAxis::Horizontal),
+        _ => None,
+    };
+    if let Some(axis) = axis {
         if cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0 {
-            return Ok(Some(ScreenshotSelection::Longshot(region)));
+            return Ok(Some(ScreenshotSelection::Longshot(region, axis)));
         }
         return Err(PinshotError::Dbus("前端返回无效的长截图选区".into()));
     }

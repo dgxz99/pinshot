@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use image::RgbaImage;
 
 use super::failure;
@@ -17,20 +19,40 @@ const MIN_SCORE_GAP: u32 = 96;
 
 type RowFeature = [u8; ROW_FEATURES];
 
-/// 一帧处理后的可见状态，已知静止或回滚不改变画布
+/// 一帧处理后的状态，长度是当前拼接轴上的像素数
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Progress {
-    Started { height: u32 },
-    Extended { height: u32 },
+    Started { length: u32 },
+    Extended { length: u32 },
     Unchanged,
     Unmatched,
-    LimitReached { height: u32 },
+    LimitReached { length: u32 },
 }
 
-/// 只把可信重叠之后新出现的底部像素追加到画布
+#[derive(Clone, Copy)]
+struct Overlap {
+    canvas_start: usize,
+    frame_start: usize,
+    len: usize,
+}
+
+impl Overlap {
+    fn at(top: isize, canvas_height: usize, frame_height: usize) -> Self {
+        let canvas_start = top.max(0) as usize;
+        let frame_start = (-top).max(0) as usize;
+        let len = (canvas_height - canvas_start).min(frame_height - frame_start);
+        Self {
+            canvas_start,
+            frame_start,
+            len,
+        }
+    }
+}
+
+/// 只在已验证重叠的前后两端补齐新出现的像素行
 pub(super) struct Stitcher {
-    pixels: Vec<u8>,
-    rows: Vec<RowFeature>,
+    pixels: VecDeque<u8>,
+    rows: VecDeque<RowFeature>,
     width: usize,
     frame_height: usize,
     height_limit: usize,
@@ -47,8 +69,8 @@ impl Stitcher {
         if height > height_limit {
             return Err(failure("初始化长图拼接", "首帧已超出输出尺寸上限"));
         }
-        let rows = row_features(first.as_raw(), width);
-        let mut pixels = first.into_raw();
+        let rows = row_features(first.as_raw(), width).into();
+        let mut pixels = VecDeque::from(first.into_raw());
         // 指数扩容会越过预算；预留受限画布空间，物理页随实际写入增长
         pixels
             .try_reserve_exact(width * height_limit * 4 - pixels.len())
@@ -77,27 +99,30 @@ impl Stitcher {
         }
         if self.is_full() {
             return Ok(Progress::LimitReached {
-                height: self.height(),
+                length: self.height(),
             });
         }
         let features = row_features(frame.as_raw(), self.width);
-        let previous = &self.rows[self.last_top..][..self.frame_height];
+        let current_height = self.rows.len();
+        let last_top = self.last_top as isize;
+        let previous = Overlap::at(last_top, current_height, self.frame_height);
         // 局部光标闪烁或滚动条变化不应被当作滚动
-        if feature_error(previous, &features) <= STATIONARY_ERROR
-            && self.pixel_error(frame, self.last_top, self.frame_height) <= STATIONARY_ERROR
+        if self.feature_error(&features, previous) <= STATIONARY_ERROR
+            && self.pixel_error(frame, previous) <= STATIONARY_ERROR
         {
             return Ok(Progress::Unchanged);
         }
 
-        let current_height = self.rows.len();
         let min_overlap = MIN_OVERLAP.max(self.frame_height / 3);
-        let earliest_top = current_height.saturating_sub(LOOKBACK_VIEWPORTS * self.frame_height);
-        let latest_top = current_height - min_overlap;
-        let mut best = (u32::MAX, 0);
+        let lookaround = (LOOKBACK_VIEWPORTS * self.frame_height) as isize;
+        let earliest_top =
+            (last_top - lookaround).max(-((self.frame_height - min_overlap) as isize));
+        let latest_top = (last_top + lookaround).min((current_height - min_overlap) as isize);
+        let mut best = (u32::MAX, last_top);
         let mut runner_up = u32::MAX;
         for top in earliest_top..=latest_top {
-            let overlap = self.frame_height.min(current_height - top);
-            let score = feature_error(&self.rows[top..top + overlap], &features[..overlap]);
+            let overlap = Overlap::at(top, current_height, self.frame_height);
+            let score = self.feature_error(&features, overlap);
             if score < best.0 {
                 runner_up = best.0;
                 best = (score, top);
@@ -106,51 +131,82 @@ impl Stitcher {
             }
         }
         let (score, top) = best;
-        let overlap = self.frame_height.min(current_height - top);
+        let overlap = Overlap::at(top, current_height, self.frame_height);
         // 保留一个独立的 RGB 检查，防止亮度特征的碰撞导致错接
         if score > MAX_FEATURE_ERROR
             || runner_up - score < MIN_SCORE_GAP
-            || self.pixel_error(frame, top, overlap) > MAX_PIXEL_ERROR
+            || self.pixel_error(frame, overlap) > MAX_PIXEL_ERROR
         {
             return Ok(Progress::Unmatched);
         }
-        if overlap == self.frame_height {
-            self.last_top = top;
+        if overlap.len == self.frame_height {
+            self.last_top = overlap.canvas_start;
             return Ok(Progress::Unchanged);
         }
 
-        let added = (self.frame_height - overlap).min(self.height_limit - current_height);
-        let pitch = self.width * 4;
-        self.pixels
-            .extend_from_slice(&frame.as_raw()[overlap * pitch..(overlap + added) * pitch]);
-        self.rows
-            .extend_from_slice(&features[overlap..overlap + added]);
+        self.extend(frame, &features, overlap);
         if self.is_full() {
             return Ok(Progress::LimitReached {
-                height: self.height(),
+                length: self.height(),
             });
         }
-        self.last_top = top;
+        self.last_top = overlap.canvas_start;
         Ok(Progress::Extended {
-            height: self.height(),
+            length: self.height(),
         })
     }
 
-    fn pixel_error(&self, frame: &RgbaImage, top: usize, overlap: usize) -> u32 {
-        let rows = overlap.min(FEATURE_ROWS);
+    fn extend(&mut self, frame: &RgbaImage, features: &[RowFeature], overlap: Overlap) {
+        let remaining = self.height_limit - self.rows.len();
+        let pitch = self.width * 4;
+        if overlap.frame_start > 0 {
+            // 达到上限时保留紧邻旧画布的行，不留下缺口
+            let end = overlap.frame_start;
+            let start = end.saturating_sub(remaining);
+            for &byte in frame.as_raw()[start * pitch..end * pitch].iter().rev() {
+                self.pixels.push_front(byte);
+            }
+            for &row in features[start..end].iter().rev() {
+                self.rows.push_front(row);
+            }
+        } else {
+            let start = overlap.len;
+            let end = self.frame_height.min(start + remaining);
+            self.pixels
+                .extend(&frame.as_raw()[start * pitch..end * pitch]);
+            self.rows.extend(&features[start..end]);
+        }
+    }
+
+    fn feature_error(&self, features: &[RowFeature], overlap: Overlap) -> u32 {
+        let rows = overlap.len.min(FEATURE_ROWS);
+        let mut total = 0;
+        for row in 0..rows {
+            let y = sample_at(row, overlap.len, rows);
+            let above = &self.rows[overlap.canvas_start + y];
+            let below = &features[overlap.frame_start + y];
+            for (a, b) in above.iter().zip(below) {
+                total += u32::from(a.abs_diff(*b));
+            }
+        }
+        total * 256 / (rows * ROW_FEATURES) as u32
+    }
+
+    fn pixel_error(&self, frame: &RgbaImage, overlap: Overlap) -> u32 {
+        let rows = overlap.len.min(FEATURE_ROWS);
         let inset = self.width / 24;
         let span = self.width - 2 * inset;
         let columns = span.min(CHECK_COLUMNS);
         let pitch = self.width * 4;
         let mut total = 0;
         for row in 0..rows {
-            let y = sample_at(row, overlap, rows);
-            let above = &self.pixels[(top + y) * pitch..];
-            let below = &frame.as_raw()[y * pitch..];
+            let y = sample_at(row, overlap.len, rows);
+            let above = (overlap.canvas_start + y) * pitch;
+            let below = &frame.as_raw()[(overlap.frame_start + y) * pitch..];
             for column in 0..columns {
                 let pixel = (inset + sample_at(column, span, columns)) * 4;
-                for channel in pixel..pixel + 3 {
-                    total += u32::from(above[channel].abs_diff(below[channel]));
+                for (channel, &value) in below[pixel..pixel + 3].iter().enumerate() {
+                    total += u32::from(self.pixels[above + pixel + channel].abs_diff(value));
                 }
             }
         }
@@ -158,21 +214,13 @@ impl Stitcher {
     }
 
     pub(super) fn finish(self) -> Result<RgbaImage> {
-        RgbaImage::from_raw(self.width as u32, self.rows.len() as u32, self.pixels)
-            .ok_or_else(|| failure("生成长图", "无效的像素缓冲区"))
+        RgbaImage::from_raw(
+            self.width as u32,
+            self.rows.len() as u32,
+            self.pixels.into(),
+        )
+        .ok_or_else(|| failure("生成长图", "无效的像素缓冲区"))
     }
-}
-
-fn feature_error(above: &[RowFeature], below: &[RowFeature]) -> u32 {
-    let rows = above.len().min(FEATURE_ROWS);
-    let mut total = 0;
-    for row in 0..rows {
-        let y = sample_at(row, above.len(), rows);
-        for (a, b) in above[y].iter().zip(below[y]) {
-            total += u32::from(a.abs_diff(b));
-        }
-    }
-    total * 256 / (rows * ROW_FEATURES) as u32
 }
 
 fn row_features(pixels: &[u8], width: usize) -> Vec<RowFeature> {
@@ -226,11 +274,11 @@ mod tests {
         );
         assert_eq!(
             stitcher.push(&viewport(&page, 27)).unwrap(),
-            Progress::Extended { height: 117 }
+            Progress::Extended { length: 117 }
         );
         assert_eq!(
             stitcher.push(&viewport(&page, 51)).unwrap(),
-            Progress::Extended { height: 141 }
+            Progress::Extended { length: 141 }
         );
         assert_eq!(
             stitcher.push(&viewport(&page, 19)).unwrap(),
@@ -242,7 +290,7 @@ mod tests {
         );
         assert_eq!(
             stitcher.push(&viewport(&page, 52)).unwrap(),
-            Progress::Extended { height: 142 }
+            Progress::Extended { length: 142 }
         );
         assert_eq!(
             stitcher.finish().unwrap(),
@@ -261,7 +309,7 @@ mod tests {
         assert_eq!(stitcher.height(), 90);
         assert_eq!(
             stitcher.push(&viewport(&page, 35)).unwrap(),
-            Progress::Extended { height: 125 }
+            Progress::Extended { length: 125 }
         );
         assert_eq!(
             stitcher.finish().unwrap(),
@@ -300,12 +348,56 @@ mod tests {
     }
 
     #[test]
+    fn extends_both_ends_and_traverses_a_long_existing_canvas_without_duplicates() {
+        let page = document(640, 0);
+        let mut stitcher = Stitcher::new(viewport(&page, 180), 1000).unwrap();
+        for top in [215, 255, 295, 335, 375, 415, 455] {
+            assert_eq!(
+                stitcher.push(&viewport(&page, top)).unwrap(),
+                Progress::Extended {
+                    length: top + 90 - 180
+                }
+            );
+        }
+        for top in [415, 375, 335, 295, 255, 215, 180] {
+            assert_eq!(
+                stitcher.push(&viewport(&page, top)).unwrap(),
+                Progress::Unchanged
+            );
+        }
+        for top in [145, 105, 65] {
+            assert_eq!(
+                stitcher.push(&viewport(&page, top)).unwrap(),
+                Progress::Extended { length: 545 - top }
+            );
+        }
+        assert_eq!(
+            stitcher.finish().unwrap(),
+            crop_imm(&page, 0, 65, 80, 480).to_image()
+        );
+    }
+
+    #[test]
+    fn clips_last_prepend_without_a_gap_at_height_limit() {
+        let page = document(150, 0);
+        let mut stitcher = Stitcher::new(viewport(&page, 40), 96).unwrap();
+        assert_eq!(
+            stitcher.push(&viewport(&page, 20)).unwrap(),
+            Progress::LimitReached { length: 96 }
+        );
+        assert_eq!(
+            stitcher.finish().unwrap(),
+            crop_imm(&page, 0, 34, 80, 96).to_image()
+        );
+    }
+
+    #[test]
     fn clips_last_append_at_height_limit() {
         let page = document(150, 0);
         let mut stitcher = Stitcher::new(viewport(&page, 0), 96).unwrap();
         assert_eq!(
             stitcher.push(&viewport(&page, 20)).unwrap(),
-            Progress::LimitReached { height: 96 }
+            Progress::LimitReached { length: 96 }
         );
         assert_eq!(
             stitcher.finish().unwrap(),

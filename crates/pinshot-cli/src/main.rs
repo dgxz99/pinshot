@@ -190,6 +190,7 @@ fn deliver_capture(
 ) -> Result<()> {
     match captured.action {
         ScreenshotAction::Copy => Ok(clipboard::copy_png_bytes(
+            frontend,
             &captured.png_bytes,
             captured.source_scale,
         )?),
@@ -225,7 +226,9 @@ fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage, kind: PinK
     )?;
 
     push_pin_to_frontend(&store, &record)?;
-    if let Err(error) = clipboard::copy_png_bytes(&captured.png_bytes, captured.source_scale) {
+    if let Err(error) =
+        clipboard::copy_png_bytes(frontend, &captured.png_bytes, captured.source_scale)
+    {
         notify::warn("Pinshot", &format!("截图已贴出，但复制失败：{error}"));
     }
     finish_screenshot(&cfg, &output, &captured.png_bytes, message)
@@ -244,7 +247,7 @@ fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Resul
     if let Some(edited) = annotate::edit_png(&captured.png_bytes)? {
         let cfg = Config::load_or_init()?;
         let output = frontend.screenshot_settings()?;
-        clipboard::copy_png_bytes(&edited, captured.source_scale)?;
+        clipboard::copy_png_bytes(frontend, &edited, captured.source_scale)?;
         finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;
     }
     Ok(())
@@ -570,6 +573,7 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 .get(&id)?
                 .with_context(|| format!("未找到贴图记录: {id}"))?;
             Ok(clipboard::copy_png_file(
+                &FrontendClient::connect()?,
                 &record.image_path,
                 record.source_scale,
             )?)

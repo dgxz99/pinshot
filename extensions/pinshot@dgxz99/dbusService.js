@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
+import St from 'gi://St';
 
 import {LongshotController} from './longshot.js';
 import {PinshotScreenshot, nativeScreenshotActive} from './screenshot.js';
@@ -9,6 +10,12 @@ export const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
 export const FRONTEND_OBJECT_PATH = '/io/github/dgxz99/Pinshot/Frontend';
 export const FRONTEND_INTERFACE_NAME = 'io.github.dgxz99.Pinshot.Frontend1';
 export const FRONTEND_ID = 'gnome-shell-51';
+
+Gio._promisify(Gio.InputStream.prototype, 'read_bytes_async');
+
+// 覆盖长图编码上限并限制 D-Bus 文件描述符读入的内存量
+const MAX_CLIPBOARD_PNG_BYTES = 224 * 1024 * 1024;
+const PNG_SIGNATURE = new GLib.Bytes([137, 80, 78, 71, 13, 10, 26, 10]);
 
 const FRONTEND_IFACE_XML = `
 <node>
@@ -114,6 +121,10 @@ const FRONTEND_IFACE_XML = `
     <signal name="LongshotAction">
       <arg type="s" name="action"/>
     </signal>
+    <method name="SetClipboardPng">
+      <arg type="h" direction="in" name="input_fd"/>
+      <arg type="u" direction="in" name="length"/>
+    </method>
     <method name="GetClipboardImageScale">
       <arg type="d" direction="out" name="scale"/>
     </method>
@@ -212,6 +223,31 @@ export class PinshotDbusService {
 
     ListActivePins() {
         return JSON.stringify(this._pinManager.listActivePins());
+    }
+
+    async SetClipboardPngAsync([handle, length], invocation) {
+        let input;
+        try {
+            const headerLength = PNG_SIGNATURE.get_size();
+            if (length < headerLength || length > MAX_CLIPBOARD_PNG_BYTES) {
+                throw new Error('剪贴板 PNG 长度超出范围');
+            }
+            const fds = invocation.get_message().get_unix_fd_list();
+            if (!fds || handle < 0 || handle >= fds.get_length()) {
+                throw new Error('写入剪贴板缺少有效的输入文件描述符');
+            }
+            input = GioUnix.InputStream.new(fds.get(handle), true);
+            const bytes = await input.read_bytes_async(length, GLib.PRIORITY_DEFAULT, null);
+            if (bytes.get_size() !== length || !GLib.Bytes.new_from_bytes(bytes, 0, headerLength).equal(PNG_SIGNATURE)) {
+                throw new Error('剪贴板 PNG 无效或未完整传输');
+            }
+            St.Clipboard.get_default().set_content(St.ClipboardType.CLIPBOARD, 'image/png', bytes);
+            invocation.return_value(new GLib.Variant('()', []));
+        } catch (error) {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.ClipboardFailed`, error.message);
+        } finally {
+            input?.close(null);
+        }
     }
 
     GetClipboardImageScale() {

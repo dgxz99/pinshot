@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 
 use crate::capture::ensure_png_bytes;
 use crate::clipboard_png;
+use crate::dbus_client::FrontendClient;
 use crate::desktop::decode_file_uri;
 use crate::error::{PinshotError, Result};
 
@@ -90,15 +91,19 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
 }
 
 /// 将 PNG 写入 Wayland 剪贴板，并保留重新贴图所需的原始倍率
-pub fn copy_png_bytes(bytes: &[u8], source_scale: f64) -> Result<()> {
+pub fn copy_png_bytes(frontend: &FrontendClient, bytes: &[u8], source_scale: f64) -> Result<()> {
     let tagged = clipboard_png::with_source_scale(bytes, source_scale);
-    run_wl_copy("image/png", tagged.as_deref().unwrap_or(bytes))
+    let png = tagged.as_deref().unwrap_or(bytes);
+    if frontend.set_clipboard_png(png)? {
+        return Ok(());
+    }
+    run_wl_copy("image/png", png)
 }
 
 /// 读取本地 PNG 文件并带上倍率写入 Wayland 剪贴板
-pub fn copy_png_file(path: &Path, source_scale: f64) -> Result<()> {
+pub fn copy_png_file(frontend: &FrontendClient, path: &Path, source_scale: f64) -> Result<()> {
     let bytes = fs::read(path).map_err(|e| PinshotError::io(path, e))?;
-    copy_png_bytes(&bytes, source_scale)
+    copy_png_bytes(frontend, &bytes, source_scale)
 }
 
 /// 将 UTF-8 纯文本写入 Wayland 剪贴板
@@ -156,7 +161,10 @@ fn list_clipboard_types() -> Result<Vec<String>> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // 剪贴板为空或当前无可用数据时，wl-paste 返回非零退出码，此处视为 Empty
-        if stderr.contains("Nothing is copied") || stderr.contains("No selection") || stderr.is_empty() {
+        if stderr.contains("Nothing is copied")
+            || stderr.contains("No selection")
+            || stderr.is_empty()
+        {
             return Ok(Vec::new());
         }
         return Err(PinshotError::ExternalCommand {

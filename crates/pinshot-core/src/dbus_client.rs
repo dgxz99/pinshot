@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::{Seek, Write};
 use std::os::fd::AsFd;
 
 use zbus::blocking::Connection;
@@ -26,6 +27,7 @@ trait Frontend1 {
     fn unghost_all(&self) -> zbus::Result<u32>;
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
+    fn set_clipboard_png(&self, input_fd: Fd<'_>, length: u32) -> zbus::Result<()>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
     fn choose_capture(
         &self,
@@ -147,6 +149,23 @@ impl FrontendClient {
             result => result
                 .map(|(scale, action)| (scale, action, empty))
                 .map_err(map_zbus_err),
+        }
+    }
+
+    /// 交给 Shell 发布 PNG，避免普通 Wayland 剪贴板源被 Shell 扩展按错误的 MIME 读取
+    pub(crate) fn set_clipboard_png(&self, png: &[u8]) -> Result<bool> {
+        let length =
+            u32::try_from(png.len()).map_err(|_| PinshotError::Dbus("剪贴板 PNG 太大".into()))?;
+        let dir = std::env::temp_dir();
+        let mut file = tempfile::tempfile().map_err(|error| PinshotError::io(&dir, error))?;
+        file.write_all(png)
+            .map_err(|error| PinshotError::io(&dir, error))?;
+        file.rewind()
+            .map_err(|error| PinshotError::io(&dir, error))?;
+        match self.proxy.set_clipboard_png(Fd::from(file.as_fd()), length) {
+            Ok(()) => Ok(true),
+            Err(ref error) if unknown_method(error) => Ok(false),
+            Err(error) => Err(map_zbus_err(error)),
         }
     }
 

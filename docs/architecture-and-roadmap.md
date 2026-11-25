@@ -107,6 +107,7 @@
 | `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 兼容旧版 CLI，只提供静态截图动作；取消返回 `0` 与空字符串 |
 | `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
 | `GetScreenshotSettings()` | 无 | `b`, `s`, `s`, `b` | 读取 Pinshot 自动导出、目录、文件名前缀、完成通知设置 |
+| `SetClipboardPng(input_fd, length)` | `h`, `u` | — | 用与 GNOME 原生截图相同的 Shell 剪贴板源发布 PNG，避免剪贴板历史将图像读成文本。只在旧扩展缺少此方法时退回 `wl-copy` |
 | `GetClipboardImageScale()` | 无 | `d` | 外部图片未携带原始倍率时：默认返回 `1.0`；启用屏幕像素 1:1 时返回指针所在显示器的倍率 |
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 在授权屏内校验普通截图选区并直接显示录制工具条；选区无效时不进入录制 |

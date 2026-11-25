@@ -3,6 +3,12 @@
   <h1>Pinshot</h1>
   <p><strong>在 GNOME Wayland 上截图、贴图和录制 GIF。</strong></p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
+  <p>
+    <a href="#安装"><img src="https://img.shields.io/badge/GNOME%20Shell-51-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 51" /></a>
+    <a href="#安装"><img src="https://img.shields.io/badge/Wayland-F29B26?style=flat-square&amp;logo=wayland&amp;logoColor=white" alt="Wayland" /></a>
+    <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-B7410E?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2C8A5B?style=flat-square" alt="MIT 许可证" /></a>
+  </p>
   <p><a href="#功能">功能</a> · <a href="#安装">安装</a> · <a href="#快速上手">快速上手</a> · <a href="https://github.com/dgxz99/pinshot/issues">反馈问题</a></p>
 </div>
 
@@ -169,8 +175,6 @@ max_lines = 80
 - **查看日志**：运行`journalctl --user -b -o cat | grep -i pinshot`。[反馈问题](https://github.com/dgxz99/pinshot/issues)时请附上GNOME Shell版本、是否为Wayland会话和复现步骤。
 - **卸载**：运行`./scripts/uninstall.sh`，默认保留Core配置和缓存；加`--purge`会一并删除。已经导出的文件不受影响。
 
-## 项目结构
+## 开源协议
 
-[GNOME Shell扩展](extensions/pinshot@dgxz99/)负责选区、快捷键、首选项和桌面贴图。[Rust CLI](crates/pinshot-cli/)通过会话D-Bus与扩展通信；[Core](crates/pinshot-core/)负责图像、剪贴板、缓存和录制。CLI按需运行，不需要额外的Pinshot守护进程。
-
-实现细节见[架构与路线图](docs/architecture-and-roadmap.md)。
+Pinshot采用[MIT许可证](LICENSE)。

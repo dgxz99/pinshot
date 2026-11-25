@@ -2,7 +2,13 @@
   <img src="extensions/pinshot@dgxz99/icons/pinshot.svg" width="112" height="112" alt="Pinshot logo" />
   <h1>Pinshot</h1>
   <p><strong>Take screenshots, pin references, and record GIFs on GNOME Wayland.</strong></p>
-  <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p><strong>English</strong> · <a href="README.zh-CN.md">Simplified Chinese</a></p>
+  <p>
+    <a href="#installation"><img src="https://img.shields.io/badge/GNOME%20Shell-51-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 51" /></a>
+    <a href="#installation"><img src="https://img.shields.io/badge/Wayland-F29B26?style=flat-square&amp;logo=wayland&amp;logoColor=white" alt="Wayland" /></a>
+    <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-B7410E?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2C8A5B?style=flat-square" alt="MIT License" /></a>
+  </p>
   <p><a href="#features">Features</a> · <a href="#installation">Installation</a> · <a href="#quick-start">Quick start</a> · <a href="https://github.com/dgxz99/pinshot/issues">Report an issue</a></p>
 </div>
 
@@ -75,7 +81,7 @@ To update, pull the latest changes and rerun `./scripts/install.sh`. For develop
 | Show or hide all pins | Not bound | `pinshot toggle-hide` |
 | Restore the most recently closed pin | Not bound | `pinshot restore-last` |
 
-`Super` is usually the Windows key. Open preferences with `gnome-extensions prefs pinshot@dgxz99` to change or disable bindings. The preferences UI currently uses Chinese labels; look for **快捷键** (Shortcuts) and **框选内快捷键** (Shortcuts inside the selection).
+`Super` is usually the Windows key. Open preferences with `gnome-extensions prefs pinshot@dgxz99` to change or disable bindings. The preferences UI currently uses Simplified Chinese.
 
 ### Capture, copy, or pin
 
@@ -85,7 +91,7 @@ To update, pull the latest changes and rerun `./scripts/install.sh`. For develop
 
 ### Work with pins
 
-Copy an image or some text in any app and press `Super+Shift+V`. Pinshot doesn’t take over the app’s `Ctrl+C`. A screenshot copied by Pinshot keeps its original display size when pinned again, subject to fit-to-screen for large images. For external images on scaled displays, the clipboard image settings under **截图** (Screenshots) offer a device-pixel 1:1 option.
+Copy an image or some text in any app and press `Super+Shift+V`. Pinshot doesn’t take over the app’s `Ctrl+C`. A screenshot copied by Pinshot keeps its original display size when pinned again, subject to fit-to-screen for large images. For external images on scaled displays, the clipboard image settings on the Screenshots page offer a device-pixel 1:1 option.
 
 | Action | Gesture |
 | --- | --- |
@@ -117,14 +123,14 @@ GIFs loop and include the pointer, but not audio. The chosen FPS is a sampling c
 
 ## Saving and settings
 
-Open **截图** (Screenshots) in the extension preferences:
+Open the Screenshots page in the extension preferences:
 
 | Setting | Behavior |
 | --- | --- |
-| Save directory (保存目录) | Shared by Pinshot PNGs and GIFs. Use an absolute path or one starting with `~/`, then click Apply next to the field. A blank field uses `general.save_dir` in the Core configuration, which defaults to `~/Pictures/Pinshots`. |
-| Filename prefix (文件名前缀) | Defaults to `pinshot`. Filenames include the local save time, such as `pinshot-20261121-214530.png`. A suffix like `-1` avoids overwriting another file. |
-| Automatically save to disk (自动保存到目录) | Off by default. Enable it to also export results you pin or confirm in Satty. Copy still only copies. Explicit Save and GIF stopping work with the toggle off. |
-| Screenshot completion notifications (显示截图完成通知) | Off by default. Does not control GIF save notifications, explicit save notifications, or GNOME’s own `Print` workflow. |
+| Save directory | Shared by Pinshot PNGs and GIFs. Use an absolute path or one starting with `~/`, then click Apply next to the field. A blank field uses `general.save_dir` in the Core configuration, which defaults to `~/Pictures/Pinshots`. |
+| Filename prefix | Defaults to `pinshot`. Filenames include the local save time, such as `pinshot-20261121-214530.png`. A suffix like `-1` avoids overwriting another file. |
+| Automatically save to disk | Off by default. Enable it to also export results you pin or confirm in Satty. Copy still only copies. Explicit Save and GIF stopping work with the toggle off. |
+| Screenshot completion notifications | Off by default. Does not control GIF save notifications, explicit save notifications, or GNOME’s own `Print` workflow. |
 
 ### Cache and history
 
@@ -169,8 +175,6 @@ Text-card settings apply to new cards. The extension reads `[pin]` settings (suc
 - **Need logs?** Run `journalctl --user -b -o cat | grep -i pinshot`. When [reporting an issue](https://github.com/dgxz99/pinshot/issues), include your GNOME Shell version, whether the session is Wayland, and steps to reproduce it.
 - **Uninstall:** Run `./scripts/uninstall.sh`. It preserves the Core configuration and cache unless you pass `--purge`. Exported files are not removed.
 
-## Project layout
+## License
 
-The [GNOME Shell extension](extensions/pinshot@dgxz99/) handles selections, shortcuts, preferences, and desktop pins. The [Rust CLI](crates/pinshot-cli/) talks to it over the session D-Bus; [Core](crates/pinshot-core/) handles images, clipboard data, caching, and recording. The CLI runs on demand, with no separate Pinshot daemon.
-
-See the [architecture and roadmap](docs/architecture-and-roadmap.md) (in Chinese) for implementation details.
+Pinshot is available under the [MIT License](LICENSE).

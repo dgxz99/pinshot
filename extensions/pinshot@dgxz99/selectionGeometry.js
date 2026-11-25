@@ -93,6 +93,18 @@ export function toolbarMonitor(rect, monitors) {
     return best;
 }
 
+/** 下拉菜单锚定按钮，在屏幕底部空间不足时向上展开 */
+export function actionMenuPosition([x, y, , height], [menuWidth, menuHeight], monitor) {
+    const gap = 4;
+    const left = monitor.x + gap;
+    const top = monitor.y + gap;
+    const right = Math.max(left, monitor.x + monitor.width - menuWidth - gap);
+    const bottom = Math.max(top, monitor.y + monitor.height - menuHeight - gap);
+    const below = Math.ceil(y + height) + gap;
+    const menuY = below <= bottom ? below : Math.floor(y) - menuHeight - gap;
+    return [clamp(Math.floor(x), left, right), clamp(menuY, top, bottom)];
+}
+
 /** 优先贴下缘、上缘和两侧；录制时不允许工具条盖住采集区域 */
 export function toolbarPosition([x, y, width, height], [tw, th], screen, {allowOverlap = true} = {}) {
     const gap = 8;

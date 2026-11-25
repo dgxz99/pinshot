@@ -10,7 +10,7 @@ import {OUTPUT_ACTIONS, parseSelectionShortcut, SELECTION_ACTIONS} from './selec
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
 const RECORD_ACTIONS = [
-    {id: 'longshot', label: '纵向长截图', icon: 'scrollshot'},
+    {id: 'longshot', label: '纵向长截图', icon: 'scrollshot-vertical'},
     {id: 'longshot-horizontal', label: '横向长截图', icon: 'scrollshot-horizontal'},
 ];
 const CANCELLED = [0, '', CANCELLED_REGION];
@@ -38,7 +38,12 @@ export class PinshotScreenshot {
             throw new Error('无效的截图默认动作');
         }
         const recordingActions = RECORD_ACTIONS.filter(({id}) => offeredActions.includes(id));
-        const actions = [...recordingActions];
+        const actions = [];
+        if (recordingActions.length > 1) {
+            actions.push({id: 'longshot-menu', label: '长截图', icon: 'scrollshot', choices: recordingActions});
+        } else {
+            actions.push(...recordingActions);
+        }
         if (initial) {
             for (const action of OUTPUT_ACTIONS) {
                 if (action.id === 'save' && !offerSave) {

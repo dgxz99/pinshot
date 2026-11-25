@@ -5,7 +5,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {createActionButton} from './actionIcons.js';
-import {containsPoint, handleAt, handlesFor, moveRegion, regionBetween, resizeRegion,
+import {actionMenuPosition, containsPoint, handleAt, handlesFor, moveRegion, regionBetween, resizeRegion,
     toolbarMonitor, toolbarPosition} from './selectionGeometry.js';
 
 const HANDLE_SIZE = 8;
@@ -34,6 +34,7 @@ export class RegionSelector {
         this._defaultAction = defaultAction;
         this._rect = null;
         this._drag = null;
+        this._actionMenu = null;
         this._grab = null;
     }
 
@@ -95,6 +96,8 @@ export class RegionSelector {
             const button = createActionButton('pinshot-selection-action', action, () => {
                 if (action.id === 'cancel') {
                     this.close();
+                } else if (action.choices) {
+                    this._openActionMenu(button, action.choices);
                 } else {
                     this._confirm(action.id === 'confirm' ? this._defaultAction : action.id);
                 }
@@ -104,10 +107,72 @@ export class RegionSelector {
         return toolbar;
     }
 
+    /** 在当前模态层中展开选项，避免第二次抓取输入或重新框选 */
+    _openActionMenu(button, choices) {
+        const [x, y] = button.get_transformed_position();
+        const anchor = [x, y, ...button.get_transformed_size()];
+        const monitor = toolbarMonitor(anchor, Main.layoutManager.monitors);
+        if (!monitor) {
+            return;
+        }
+        const menu = new St.BoxLayout({name: 'pinshot-selection-action-menu',
+            orientation: Clutter.Orientation.VERTICAL, style_class: 'pinshot-selection-action-menu', reactive: true});
+        menu.set_cursor_type(Clutter.CursorType.DEFAULT);
+        for (const choice of choices) {
+            menu.add_child(createActionButton('pinshot-selection-choice', choice,
+                () => this._confirm(choice.id), {showLabel: true}));
+        }
+        this._actionMenu = menu;
+        this._layer.add_child(menu);
+        const [, width] = menu.get_preferred_width(-1);
+        const [, height] = menu.get_preferred_height(width);
+        const [mx, my] = actionMenuPosition(anchor, [width, height], monitor);
+        menu.set_position(mx - this._area.x, my - this._area.y);
+        menu.set_size(width, height);
+        menu.get_first_child().grab_key_focus();
+    }
+
+    _dismissActionMenu() {
+        this._actionMenu.destroy();
+        this._actionMenu = null;
+        this._layer.grab_key_focus();
+    }
+
+    _onActionMenuEvent(type, event) {
+        if (type === Clutter.EventType.KEY_PRESS) {
+            const key = event.get_key_symbol();
+            if (key === Clutter.KEY_Escape) {
+                this._dismissActionMenu();
+                return Clutter.EVENT_STOP;
+            }
+            if (key === Clutter.KEY_Down || key === Clutter.KEY_Up || key === Clutter.KEY_Tab ||
+                key === Clutter.KEY_ISO_Left_Tab) {
+                const items = this._actionMenu.get_children();
+                const current = items.indexOf(global.stage.get_key_focus());
+                const step = key === Clutter.KEY_Down || key === Clutter.KEY_Tab ? 1 : -1;
+                items[(current + step + items.length) % items.length].grab_key_focus();
+                return Clutter.EVENT_STOP;
+            }
+        }
+        const pointer = type === Clutter.EventType.MOTION || type === Clutter.EventType.BUTTON_PRESS ||
+            type === Clutter.EventType.BUTTON_RELEASE;
+        const target = pointer ? global.stage.get_event_actor(event) : global.stage.get_key_focus();
+        if (target && this._actionMenu.contains(target)) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+        if (type === Clutter.EventType.BUTTON_PRESS) {
+            this._dismissActionMenu();
+        }
+        return Clutter.EVENT_STOP;
+    }
+
     _onEvent(event) {
         const type = event.type();
         if (!this._layer || type === Clutter.EventType.ENTER || type === Clutter.EventType.LEAVE) {
             return Clutter.EVENT_PROPAGATE;
+        }
+        if (this._actionMenu) {
+            return this._onActionMenuEvent(type, event);
         }
         if (type === Clutter.EventType.KEY_PRESS) {
             this._onKey(event);

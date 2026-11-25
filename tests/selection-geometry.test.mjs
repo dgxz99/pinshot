@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {handleAt, handlesFor, initialRegionOnMonitor, moveRegion, regionBetween, resizeRegion, toolbarMonitor,
-    toolbarPosition} from '../extensions/pinshot@dgxz99/selectionGeometry.js';
+import {actionMenuPosition, handleAt, handlesFor, initialRegionOnMonitor, moveRegion, regionBetween,
+    resizeRegion, toolbarMonitor, toolbarPosition} from '../extensions/pinshot@dgxz99/selectionGeometry.js';
 
 const bounds = {left: 10, top: 20, right: 300, bottom: 200};
 const region = [50, 60, 100, 80];
@@ -48,6 +48,12 @@ test('reuses absolute selection only if the entire region fits the shared record
 test('toolbar stays on the monitor with more of the selection', () => {
     assert.equal(toolbarMonitor([980, 250, 130, 150], [first, second]), second);
     assert.equal(toolbarMonitor([910, 350, 130, 150], [first, second]), first);
+});
+
+test('direction menu stays next to its button and flips above near a monitor boundary', () => {
+    const screen = {x: 1024, y: 200, width: 1280, height: 800};
+    assert.deepEqual(actionMenuPosition([1120, 320, 26, 26], [136, 72], screen), [1120, 350]);
+    assert.deepEqual(actionMenuPosition([2250, 955, 26, 26], [136, 72], screen), [2164, 879]);
 });
 
 test('recording toolbar stays entirely outside the captured region or reports no room', () => {

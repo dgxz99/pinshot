@@ -41,6 +41,7 @@
 
 .pinshot-selection-hint,
 .pinshot-selection-toolbar,
+.pinshot-selection-action-menu,
 .pinshot-longshot-hud {
     color: white;
     background-color: rgba(27, 27, 33, 0.98);
@@ -51,9 +52,15 @@
 }
 
 .pinshot-selection-toolbar,
+.pinshot-selection-action-menu,
 .pinshot-longshot-hud {
     padding: 3px 5px;
     spacing: 2px;
+}
+
+.pinshot-action-menu-item {
+    spacing: 8px;
+    padding: 2px 5px;
 }
 
 .pinshot-action-button {

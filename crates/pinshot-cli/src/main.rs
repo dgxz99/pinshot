@@ -47,6 +47,13 @@ enum Commands {
         #[arg(long)]
         horizontal: bool,
     },
+    /// 录制一块屏幕区域并保存为动画 GIF
+    #[cfg(feature = "longshot")]
+    Gif {
+        /// 本次不使用记住的屏幕，重新打开系统选择器
+        #[arg(long)]
+        choose_screen: bool,
+    },
     /// 将剪贴板图片、本地图片文件或纯文本渲染并贴图
     PinClipboard,
     /// 一键切换全部贴图的隐藏/显示状态
@@ -124,6 +131,8 @@ fn main() -> Result<()> {
             choose_screen,
             horizontal,
         } => cmd_longshot(choose_screen, None, scroll_axis(horizontal)),
+        #[cfg(feature = "longshot")]
+        Commands::Gif { choose_screen } => cmd_gif(choose_screen, None),
         Commands::PinClipboard => cmd_pin_clipboard(),
         Commands::ToggleHide => cmd_toggle_hide(),
         Commands::UnghostAll => cmd_unghost_all(),
@@ -177,8 +186,12 @@ fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
         Some(ScreenshotSelection::Longshot(region, axis)) => {
             return cmd_longshot(false, Some(region), axis);
         }
+        #[cfg(feature = "longshot")]
+        Some(ScreenshotSelection::Gif(region)) => return cmd_gif(false, Some(region)),
         #[cfg(not(feature = "longshot"))]
-        Some(ScreenshotSelection::Longshot(..)) => anyhow::bail!("此版本未启用滚动长截图"),
+        Some(ScreenshotSelection::Longshot(..) | ScreenshotSelection::Gif(_)) => {
+            anyhow::bail!("此版本未启用滚动长截图或 GIF 录制")
+        }
     };
     deliver_capture(&frontend, captured, PinKind::Screenshot)
 }
@@ -251,6 +264,36 @@ fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Resul
         finish_screenshot(&cfg, &output, &edited, "已复制标注图片到剪贴板")?;
     }
     Ok(())
+}
+
+#[cfg(feature = "longshot")]
+fn cmd_gif(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
+    let result = (|| -> Result<()> {
+        let output = FrontendClient::connect()?.screenshot_settings()?;
+        let directory = output.export_dir(&Config::load_or_init()?)?;
+        output.gif_stem()?;
+        let Some(recording) =
+            pinshot_core::longshot::record_gif(choose_screen, initial_region, &directory)?
+        else {
+            return Ok(());
+        };
+        let limit_reached = recording.limit_reached();
+        let path = recording.save(&directory, &output.gif_stem()?)?;
+        if limit_reached {
+            notify::info(
+                "Pinshot",
+                &format!("GIF 达到大小上限，已保存已录部分\n{}", path.display()),
+            );
+        } else if output.notify {
+            notify::info("Pinshot", &format!("GIF 已保存\n{}", path.display()));
+        }
+        println!("{}", path.display());
+        Ok(())
+    })();
+    if let Err(error) = &result {
+        notify::warn("Pinshot", &format!("GIF 录制失败：{error}"));
+    }
+    result
 }
 
 #[cfg(feature = "longshot")]

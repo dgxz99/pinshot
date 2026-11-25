@@ -44,7 +44,7 @@ impl ScreenshotAction {
     }
 }
 
-/// 虚拟桌面逻辑坐标 (x, y, width, height)，可用于把选区交给长截图
+/// 虚拟桌面逻辑坐标 (x, y, width, height)，可用于把选区交给长截图或 GIF 录制
 pub type StageRegion = (i32, i32, i32, i32);
 
 /// 一次长截图只沿一个轴拼接，允许向该轴的两端扩展
@@ -55,10 +55,11 @@ pub enum ScrollAxis {
     Horizontal,
 }
 
-/// 区域截图确认后，要么交付一张静态 PNG，要么用原选区切换到长截图
+/// 区域截图确认后交付 PNG，或把原选区交给连续录制
 pub enum ScreenshotSelection {
     Image(CapturedImage),
     Longshot(StageRegion, ScrollAxis),
+    Gif(StageRegion),
 }
 
 /// 区域截屏成功后的输出图像和交付动作
@@ -92,8 +93,19 @@ impl ScreenshotSettings {
         timestamp: &str,
     ) -> Result<PathBuf> {
         let stem = screenshot_stem(&self.filename_prefix, timestamp)?;
-        let dir = if self.save_dir.trim().is_empty() {
-            cfg.resolved_save_dir()?
+        let dir = self.export_dir(cfg)?;
+        fs::create_dir_all(&dir).map_err(|err| PinshotError::io(&dir, err))?;
+        let mut temp =
+            tempfile::NamedTempFile::new_in(&dir).map_err(|err| PinshotError::io(&dir, err))?;
+        std::io::copy(&mut png, temp.as_file_mut())
+            .map_err(|err| PinshotError::io(temp.path(), err))?;
+        persist_unique_image(temp, &dir, &stem, "png")
+    }
+
+    /// 解析截图与录制共用的保存目录
+    pub fn export_dir(&self, cfg: &Config) -> Result<PathBuf> {
+        if self.save_dir.trim().is_empty() {
+            cfg.resolved_save_dir()
         } else {
             let path = expand_tilde(self.save_dir.trim())?;
             if !path.is_absolute() {
@@ -101,14 +113,19 @@ impl ScreenshotSettings {
                     "截图保存目录必须为绝对路径或以 ~/ 开头".to_string(),
                 ));
             }
-            path
-        };
-        fs::create_dir_all(&dir).map_err(|err| PinshotError::io(&dir, err))?;
-        let mut temp =
-            tempfile::NamedTempFile::new_in(&dir).map_err(|err| PinshotError::io(&dir, err))?;
-        std::io::copy(&mut png, temp.as_file_mut())
-            .map_err(|err| PinshotError::io(temp.path(), err))?;
-        persist_unique_png(temp, &dir, &stem)
+            Ok(path)
+        }
+    }
+
+    /// 生成 GIF 文件名主体；与截图共用前缀，保存时添加当前本地时间
+    #[cfg(feature = "longshot")]
+    pub fn gif_stem(&self) -> Result<String> {
+        let prefix = strip_extension(&self.filename_prefix, "gif");
+        let timestamp = Local::now().format(EXPORT_TIME_FORMAT).to_string();
+        if prefix.is_empty() && !self.filename_prefix.trim().is_empty() {
+            return Err(PinshotError::Config("GIF 文件名前缀不能为空".into()));
+        }
+        screenshot_stem(prefix, &timestamp)
     }
 }
 
@@ -119,10 +136,7 @@ fn screenshot_stem(prefix: &str, timestamp: &str) -> Result<String> {
     } else {
         prefix
     };
-    let prefix = match prefix.rsplit_once('.') {
-        Some((name, ext)) if ext.eq_ignore_ascii_case("png") => name.trim_end(),
-        _ => prefix,
-    };
+    let prefix = strip_extension(prefix, "png");
     if prefix.is_empty() || prefix == "." || prefix == ".." || prefix.contains(['/', '\0']) {
         return Err(PinshotError::Config(
             "截图文件名前缀不能为空或包含路径".to_string(),
@@ -131,17 +145,26 @@ fn screenshot_stem(prefix: &str, timestamp: &str) -> Result<String> {
     Ok(format!("{prefix}-{timestamp}"))
 }
 
-fn persist_unique_png(
+fn strip_extension<'a>(prefix: &'a str, extension: &str) -> &'a str {
+    let prefix = prefix.trim();
+    match prefix.rsplit_once('.') {
+        Some((name, ext)) if ext.eq_ignore_ascii_case(extension) => name.trim_end(),
+        _ => prefix,
+    }
+}
+
+pub(crate) fn persist_unique_image(
     mut temp: tempfile::NamedTempFile,
     dir: &Path,
     stem: &str,
+    extension: &str,
 ) -> Result<PathBuf> {
     let mut suffix = 0;
     loop {
         let target = if suffix == 0 {
-            dir.join(format!("{stem}.png"))
+            dir.join(format!("{stem}.{extension}"))
         } else {
-            dir.join(format!("{stem}-{suffix}.png"))
+            dir.join(format!("{stem}-{suffix}.{extension}"))
         };
         match temp.persist_noclobber(&target) {
             Ok(_) => return Ok(target),
@@ -173,6 +196,12 @@ pub fn capture_interactive_region(
             return Ok(Some(ScreenshotSelection::Longshot(region, axis)));
         }
         return Err(PinshotError::Dbus("前端返回无效的长截图选区".into()));
+    }
+    if action == "gif" {
+        if cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0 {
+            return Ok(Some(ScreenshotSelection::Gif(region)));
+        }
+        return Err(PinshotError::Dbus("前端返回无效的 GIF 选区".into()));
     }
     if source_scale == 0.0 {
         return Ok(None);

@@ -1,6 +1,8 @@
-//! 滚动长图的屏幕共享与采帧入口；图像只在内存中处理
+//! 滚动长图和 GIF 共用的屏幕共享与采帧入口
 
 mod desktop;
+mod gif_encoder;
+mod gifshot;
 mod recorder;
 mod region;
 mod stitcher;
@@ -8,6 +10,8 @@ mod stream;
 mod viewport;
 
 pub use desktop::record_desktop;
+pub use gif_encoder::GifRecording;
+pub use gifshot::record_gif;
 pub use recorder::{Recording, record};
 pub use region::LogicalRegion;
 pub use stitcher::Progress;
@@ -61,12 +65,31 @@ struct SharedScreen {
 }
 
 impl SharedScreen {
+    fn logical_geometry(&self) -> Result<(i32, i32, i32, i32)> {
+        let (Some((x, y)), Some((width, height))) =
+            (self.monitor.logical_position, self.monitor.logical_size)
+        else {
+            return Err(failure("定位共享显示器", "系统未返回显示器逻辑位置和尺寸"));
+        };
+        Ok((x, y, width, height))
+    }
+
     async fn read(
         self,
         duration: Option<Duration>,
         consume: impl FnMut(RgbaImage) -> Result<ControlFlow<()>>,
     ) -> Result<()> {
-        stream::read_pipewire(self.remote, self.node_id, duration, consume).await
+        self.read_at_rate(duration, stream::LONGSHOT_FRAME_RATE, consume)
+            .await
+    }
+
+    async fn read_at_rate(
+        self,
+        duration: Option<Duration>,
+        max_frame_rate: i32,
+        consume: impl FnMut(RgbaImage) -> Result<ControlFlow<()>>,
+    ) -> Result<()> {
+        stream::read_pipewire(self.remote, self.node_id, duration, max_frame_rate, consume).await
     }
 }
 
@@ -102,7 +125,7 @@ fn run_capture<T>(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| failure("启动长图运行时", error))?;
+        .map_err(|error| failure("启动录制运行时", error))?;
     runtime.block_on(async {
         let mut interrupt =
             signal(SignalKind::interrupt()).map_err(|error| failure("监听 Ctrl+C", error))?;
@@ -128,7 +151,7 @@ fn run_capture<T>(
             {
                 Ok(_) => {}
                 Err(zbus::Error::NameTaken) => return Ok(None),
-                Err(error) => return Err(failure("预留长截图会话", error)),
+                Err(error) => return Err(failure("预留录制会话", error)),
             }
             Some(PinStore::open_default()?)
         } else {
@@ -161,7 +184,7 @@ fn run_capture<T>(
             None => Ok(None),
         };
         if let Err(error) = connection.close().await {
-            eprintln!("[pinshot] 断开长图 D-Bus 连接失败: {error}");
+            eprintln!("[pinshot] 断开录制 D-Bus 连接失败: {error}");
         }
         outcome
     })

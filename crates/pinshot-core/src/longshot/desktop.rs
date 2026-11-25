@@ -57,11 +57,7 @@ pub fn record_desktop(
     };
     run_capture(Some(selection), async |connection, screen| {
         let monitor = screen.monitor;
-        let (Some((x, y)), Some((width, height))) =
-            (monitor.logical_position, monitor.logical_size)
-        else {
-            return Err(failure("定位共享显示器", "系统未返回显示器逻辑位置和尺寸"));
-        };
+        let (x, y, width, height) = screen.logical_geometry()?;
         let frontend = LongshotFrontendProxy::new(connection)
             .await
             .map_err(|error| failure("连接 Pinshot 扩展", error))?;

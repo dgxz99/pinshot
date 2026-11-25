@@ -50,8 +50,9 @@ if [[ ! -x "$BIN_SRC" ]]; then
 fi
 
 if ! "${BIN_SRC}" longshot --help >/dev/null 2>&1 ||
+   ! "${BIN_SRC}" gif --help >/dev/null 2>&1 ||
    ! "${BIN_SRC}" internal probe-longshot --help >/dev/null 2>&1; then
-    echo "[pinshot] 此二进制无法运行长截图，请检查 GStreamer 运行库或不带 --skip-build 重新安装" >&2
+    echo "[pinshot] 此二进制无法运行长截图或 GIF，请检查 GStreamer 运行库或不带 --skip-build 重新安装" >&2
     exit 1
 fi
 

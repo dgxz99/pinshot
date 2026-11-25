@@ -15,9 +15,10 @@ const OUTLINE_WIDTH = 2;
 // 裁剪边界会在像素空间向外取整，边框与选区之间留空避免分数缩放时串色
 const OUTLINE_GAP = 2;
 const OUTLINE_MARGIN = OUTLINE_WIDTH + OUTLINE_GAP;
+const GIF_OUTPUT_ACTIONS = [{id: 'save', label: '停止并保存 GIF'}, CANCEL_ACTION];
 
 /** 录制边框只在采集范围外绘制，前景和四条边都不参与输入拾取 */
-function showRecordingOutline(monitor, rect) {
+function showRecordingOutline(monitor, rect, gif) {
     const [x, y, width, height] = rect;
     const left = x - OUTLINE_MARGIN;
     const top = y - OUTLINE_MARGIN;
@@ -33,15 +34,16 @@ function showRecordingOutline(monitor, rect) {
         [left + outerWidth - OUTLINE_WIDTH, top + OUTLINE_WIDTH,
             OUTLINE_WIDTH, outerHeight - 2 * OUTLINE_WIDTH],
     ];
+    const style = gif ? 'pinshot-gif-recording-edge' : 'pinshot-longshot-recording-edge';
     for (const [sx, sy, sw, sh] of strips) {
         outline.add_child(new St.Widget({x: sx, y: sy, width: sw, height: sh,
-            style_class: 'pinshot-longshot-recording-edge', reactive: false}));
+            style_class: style, reactive: false}));
     }
     Main.layoutManager.uiGroup.add_child(outline);
     return outline;
 }
 
-/** 长图 UI 由发起录制的 D-Bus 连接持有；进程退出时自动恢复贴图 */
+/** 长图与 GIF 共用框选、录制边框和工具条；发起连接退出时恢复贴图 */
 export class LongshotController {
     constructor(pinManager, emitAction) {
         this._pinManager = pinManager;
@@ -53,9 +55,9 @@ export class LongshotController {
         return this._session !== null;
     }
 
-    async select(owner, connection, geometry, initialRegion, axis) {
+    async select(owner, connection, geometry, initialRegion, mode) {
         if (this.active) {
-            throw new Error('已有长截图正在运行');
+            throw new Error('已有长截图或 GIF 录制正在运行');
         }
         if (Main.sessionMode.isLocked) {
             return CANCELLED_REGION;
@@ -70,7 +72,9 @@ export class LongshotController {
         if (workArea.height < HUD_SPACE + MIN_EDGE + OUTLINE_MARGIN || workArea.width < 280) {
             throw new Error('共享显示器的可用区域太小');
         }
-        const direction = axis === 'horizontal' ? '横向' : '纵向';
+        const gif = mode === 'gif';
+        const direction = mode === 'horizontal' ? '横向' : '纵向';
+        const hint = gif ? '拖动框选要录制 GIF 的区域' : `拖动框选${direction}滚动的内容`;
         const left = workArea.x - monitor.x;
         const top = workArea.y - monitor.y;
         const bottom = top + workArea.height - HUD_SPACE;
@@ -88,10 +92,10 @@ export class LongshotController {
             selector = new RegionSelector(monitor, {
                 name: 'pinshot-longshot-selector', bounds, minEdge: MIN_EDGE,
                 actions: [CANCEL_ACTION, {id: 'start', label: '开始录制'}], defaultAction: 'start',
-                hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24, text: `拖动框选${direction}滚动的内容`},
+                hint: {x: left + 12, y: bottom + 10, width: workArea.width - 24, text: hint},
             });
         }
-        const session = {owner, workArea, selector, direction};
+        const session = {owner, workArea, selector, direction, gif};
         this._session = session;
         try {
             this._pinManager.setSystemHidden(true);
@@ -112,7 +116,7 @@ export class LongshotController {
                 rect = selection.rect;
                 session.selector = null;
             }
-            session.outline = showRecordingOutline(monitor, rect);
+            session.outline = showRecordingOutline(monitor, rect, gif);
             session.outline.connect('destroy', () => {
                 session.outline = null;
             });
@@ -134,7 +138,8 @@ export class LongshotController {
             width: 132, y_align: Clutter.ActorAlign.CENTER});
         session.status.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         hud.add_child(session.status);
-        session.buttons = OUTPUT_ACTIONS.map(action => {
+        const actions = session.gif ? GIF_OUTPUT_ACTIONS : OUTPUT_ACTIONS;
+        session.buttons = actions.map(action => {
             const button = createActionButton('pinshot-longshot-action', action, () => this._act(session, action.id));
             this._setButtonEnabled(button, action.id === 'cancel');
             hud.add_child(button);
@@ -157,13 +162,20 @@ export class LongshotController {
         button.opacity = enabled ? 255 : 90;
     }
 
-    update(owner, length, warning) {
+    update(owner, length, warning, gif = false) {
         const session = this._session;
-        if (session?.owner !== owner || !session.hud) {
+        if (session?.owner !== owner || !session.hud || session.gif !== gif) {
             return false;
         }
-        if (!session.ending && length > 0) {
-            session.status.text = warning ? `${length} px · 回滚后慢滚` : `${length} px · ${session.direction}滚动`;
+        if (!session.ending && (gif || length > 0)) {
+            if (gif) {
+                const minutes = String(Math.floor(length / 60)).padStart(2, '0');
+                const seconds = String(length % 60).padStart(2, '0');
+                const duration = `${minutes}:${seconds}`;
+                session.status.text = warning ? `${duration} · 快满了` : `GIF · ${duration}`;
+            } else {
+                session.status.text = warning ? `${length} px · 回滚后慢滚` : `${length} px · ${session.direction}滚动`;
+            }
             for (const button of session.buttons) {
                 this._setButtonEnabled(button, true);
             }

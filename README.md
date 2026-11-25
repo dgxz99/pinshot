@@ -1,6 +1,6 @@
 # Pinshot
 
-Pinshot 是一款面向 Wayland 的截图、滚动长截图和贴图工具。它可以把截图、剪贴板中的图片或文字贴在桌面上，方便对照文档、代码和聊天内容。贴图由 GNOME Shell 扩展绘制，不是普通窗口，不会出现在 `Alt+Tab` 列表里。
+Pinshot 是一款面向 Wayland 的截图、滚动长截图、GIF 录制和贴图工具。它可以把截图、剪贴板中的图片或文字贴在桌面上，方便对照文档、代码和聊天内容。贴图由 GNOME Shell 扩展绘制，不是普通窗口，不会出现在 `Alt+Tab` 列表里。
 
 目前支持 **GNOME Shell 51（Wayland）**，已在 Arch Linux / GNOME Shell 51.1 上验证。
 
@@ -14,11 +14,11 @@ Pinshot 是一款面向 Wayland 的截图、滚动长截图和贴图工具。它
 | Rust / Cargo、`glib-compile-schemas` | 构建 CLI 和编译扩展设置，开发环境使用 Rust 1.100 |
 | `wl-paste`、`wl-copy`（`wl-clipboard`） | 读取和写入 Wayland 剪贴板 |
 | `pango-view`（Pango） | 将剪贴板文字渲染为贴图 |
-| GNOME ScreenCast Portal、PipeWire、GStreamer | 滚动长截图；构建需要 `pkg-config` 和 GStreamer Core、App、Video 开发库，运行需要 `pipewiresrc`、`videorate`、`videoconvert` 插件 |
+| GNOME ScreenCast Portal、PipeWire、GStreamer | 滚动长截图和 GIF 录制；构建需要 `pkg-config` 和 GStreamer Core、App、Video 开发库，运行需要 `pipewiresrc`、`videorate`、`videoconvert` 插件 |
 | `satty` | 可选，用于标注；已验证 Satty 0.22.0 |
 | `notify-send`（libnotify） | 可选，用于 Pinshot 桌面通知 |
 
-Arch Linux 上，长截图所需的 Portal 和 GStreamer 组件可通过 `xdg-desktop-portal-gnome`、`pipewire`、`gstreamer`、`gst-plugins-base`、`gst-plugins-base-libs`、`gst-plugin-pipewire` 与 `pkgconf` 软件包提供。
+Arch Linux 上，长截图和 GIF 录制所需的 Portal 和 GStreamer 组件可通过 `xdg-desktop-portal-gnome`、`pipewire`、`gstreamer`、`gst-plugins-base`、`gst-plugins-base-libs`、`gst-plugin-pipewire` 与 `pkgconf` 软件包提供。
 
 在仓库根目录执行：
 
@@ -43,13 +43,14 @@ gnome-extensions enable pinshot@dgxz99
 | --- | --- | --- |
 | 区域截图（默认复制） | `Super+Shift+P` | `pinshot capture` |
 | 滚动长截图 | `Super+Shift+L` | `pinshot longshot` |
+| 录制 GIF | 默认未绑定，可在首选项设置 | `pinshot gif` |
 | 把剪贴板图片或文字贴到桌面 | `Super+Shift+V` | `pinshot pin-clipboard` |
 | 解除全部贴图的点击穿透 | `Super+Shift+U` | `pinshot unghost-all` |
 | 截图后进入 Satty 标注 | 未绑定 | `pinshot capture-edit` |
 | 显示或隐藏全部贴图 | 未绑定 | `pinshot toggle-hide` |
 | 恢复最近关闭的一张贴图 | 未绑定 | `pinshot restore-last` |
 
-- **区域截图**：在冻结画面上拖出选框，松手后仍可调整。选框旁依次是**长截图、标注、贴图、保存、取消、复制**；工具条只显示图标。主截图入口按 `Enter` 只复制，不贴图、不保存；× 与 `Esc` 或右键一样取消。点「保存」会直接将 PNG 写到首选项设置的目录，即使关闭了自动保存，也不修改剪贴板。想默认贴图，可用 `pinshot capture-pin`。普通截图不弹共享授权；窗口或整屏截图仍可用 GNOME 自带的 `Print`。
+- **区域截图**：在冻结画面上拖出选框，松手后仍可调整。选框旁依次是**长截图、录制 GIF、标注、贴图、保存、取消、复制**；工具条只显示图标。主截图入口按 `Enter` 只复制，不贴图、不保存；× 与 `Esc` 或右键一样取消。点「保存」会直接将 PNG 写到首选项设置的目录，即使关闭了自动保存，也不修改剪贴板。想默认贴图，可用 `pinshot capture-pin`。普通截图不弹共享授权；窗口或整屏截图仍可用 GNOME 自带的 `Print`。
 - **剪贴板贴图**：先在原应用用 `Ctrl+C` 复制文字或图片，再触发贴图。例如复制一段代码，就能把它贴在编辑器旁边。Pinshot 不会接管其他应用的复制快捷键。Pinshot 复制的截图再次贴出时会保留原始大小（大图仍会适屏）。如果用其他工具截的图在高分屏上贴出偏大，可到 Pinshot 首选项「截图 → 剪贴板图片」开启「外部图片按屏幕像素 1:1 显示」。
 - **截图后标注**：运行 `pinshot capture-edit`，框选后按 `Enter` 默认打开 Satty，也可以点工具条上的其他动作。进入 Satty 后，按 `Enter` 保存并复制标注结果；`Esc` 退出且不改变剪贴板。已有贴图则用右键菜单里的「标注编辑 (satty)」，保存后会更新那张贴图。
 
@@ -70,6 +71,14 @@ gnome-extensions enable pinshot@dgxz99
 想换屏时，运行 `pinshot longshot --choose-screen`，或在「快捷键」里为「滚动长截图：重新选择屏幕」设置按键。显示器不再可用或授权被撤销时，GNOME 会重新询问。记住选择不会让 Pinshot 在后台继续录屏。
 
 长截图一次只录制一个显示器。静止和回滚不会重复拼接。框选后蓝色边框固定在屏幕上，不挡滚动；边框和控制条都不会被截进长图。达到 24,000 像素高或内存上限时会自动完成；从 GNOME 停止共享则会取消本次录制。
+
+### 录制 GIF
+
+1. 在普通截图中框选区域，点工具条里的 GIF 图标（长截图右边）。选择 GNOME 共享屏幕后，直接沿用原选区，不需要再框一次。也可以运行 `pinshot gif`，授权后框选并点开始或按 `Enter`。要换授权屏幕，用 `pinshot gif --choose-screen`。
+2. 红框标出录制区域；等框外工具条开始计时再操作。点保存图标即停止并保存，点 × 则丢弃。GIF 与长截图共用记住的屏幕授权，且不能同时运行。
+3. 输出为循环播放的 `.gif`，使用截图首选项中的保存目录、文件名前缀和保存时间。同名时追加序号；保存不修改剪贴板，也不进贴图历史。
+
+GIF 最多采集每秒 10 帧，不录制声音和鼠标指针。大选区会等比缩小，长边不超过 1280 像素、总像素数不超过 1280×720。没有固定时长上限；文件接近 64 MiB 时工具条会提醒，达到上限时自动保存已录部分。若从 GNOME 停止共享，则取消本次录制。
 
 ### 操作贴图
 

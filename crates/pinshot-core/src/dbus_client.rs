@@ -122,7 +122,7 @@ impl FrontendClient {
     ) -> Result<(f64, String, StageRegion)> {
         let fd = || Fd::from(output.as_fd());
         let offered_actions: &[&str] = if cfg!(feature = "longshot") {
-            &["longshot", "longshot-horizontal"]
+            &["longshot", "longshot-horizontal", "gif"]
         } else {
             &[]
         };

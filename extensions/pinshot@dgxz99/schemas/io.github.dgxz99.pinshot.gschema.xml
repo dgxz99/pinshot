@@ -16,6 +16,10 @@
     <key name="pinshot-longshot" type="as">
       <default>['&lt;Super&gt;&lt;Shift&gt;l']</default>
     </key>
+    <key name="pinshot-gif" type="as">
+      <default>[]</default>
+      <summary>录制 GIF</summary>
+    </key>
     <key name="pinshot-longshot-choose-screen" type="as">
       <default>[]</default>
     </key>

@@ -16,13 +16,14 @@ use crate::Result;
 
 const FRAME_TIMEOUT: Duration = Duration::from_secs(8);
 const FIRST_FRAME_SETTLE: Duration = Duration::from_millis(500);
-const MAX_FRAME_RATE: i32 = 15;
+pub(super) const LONGSHOT_FRAME_RATE: i32 = 15;
 
 /// 读取 Portal 授权的一个 PipeWire 节点，退出时先停止管线，再关闭原始描述符
 pub(super) async fn read_pipewire(
     remote: OwnedFd,
     node_id: u32,
     duration: Option<Duration>,
+    max_frame_rate: i32,
     consume: impl FnMut(RgbaImage) -> Result<ControlFlow<()>>,
 ) -> Result<()> {
     gst::init().map_err(|error| failure("初始化 GStreamer", error))?;
@@ -33,17 +34,18 @@ pub(super) async fn read_pipewire(
         .property("keepalive-time", 1000i32)
         .build()
         .map_err(|error| failure("创建 PipeWire 取帧源", error))?;
-    read_frames(&source, duration, consume).await
+    read_frames(&source, duration, max_frame_rate, consume).await
 }
 
 async fn read_frames(
     source: &gst::Element,
     duration: Option<Duration>,
+    max_frame_rate: i32,
     mut consume: impl FnMut(RgbaImage) -> Result<ControlFlow<()>>,
 ) -> Result<()> {
     let rate = gst::ElementFactory::make("videorate")
         .property("drop-only", true)
-        .property("max-rate", MAX_FRAME_RATE)
+        .property("max-rate", max_frame_rate)
         .build()
         .map_err(|error| failure("创建 GStreamer 限帧器", error))?;
     let convert = gst::ElementFactory::make("videoconvert")
@@ -173,7 +175,7 @@ struct RunningPipeline(gst::Pipeline);
 impl Drop for RunningPipeline {
     fn drop(&mut self) {
         if let Err(error) = self.0.set_state(gst::State::Null) {
-            eprintln!("[pinshot] 停止长图采帧管线失败: {error}");
+            eprintln!("[pinshot] 停止录制采帧管线失败: {error}");
         }
     }
 }
@@ -200,7 +202,7 @@ mod tests {
             .build()
             .expect("长图测试需要 GStreamer videotestsrc 插件");
         let mut count = 0;
-        read_frames(&source, None, |frame| {
+        read_frames(&source, None, LONGSHOT_FRAME_RATE, |frame| {
             assert_ne!(frame.dimensions(), (0, 0));
             count += 1;
             if count == 3 {
@@ -218,9 +220,12 @@ mod tests {
     async fn dropping_pending_capture_stops_pipeline() {
         gst::init().unwrap();
         let source = gst_app::AppSrc::builder().is_live(true).build();
-        let mut capture = Box::pin(read_frames(source.upcast_ref(), None, |_| {
-            Ok(ControlFlow::Continue(()))
-        }));
+        let mut capture = Box::pin(read_frames(
+            source.upcast_ref(),
+            None,
+            LONGSHOT_FRAME_RATE,
+            |_| Ok(ControlFlow::Continue(())),
+        ));
         assert!(futures_util::poll!(&mut capture).is_pending());
         assert_ne!(source.current_state(), gst::State::Null);
         drop(capture);

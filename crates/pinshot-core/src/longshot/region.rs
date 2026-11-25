@@ -57,7 +57,7 @@ impl PixelRegion {
         pixel_size: (u32, u32),
     ) -> Result<Self> {
         let Some((width, height)) = logical_size.filter(|&(w, h)| w > 0 && h > 0) else {
-            return Err(failure("换算长图选区", "Portal 未提供有效的显示器逻辑尺寸"));
+            return Err(failure("换算录制选区", "Portal 未提供有效的显示器逻辑尺寸"));
         };
         let map_axis = |start: u32, len: u32, logical: u32, pixels: u32| -> Option<(u32, u32)> {
             let end = start.checked_add(len)?;
@@ -70,7 +70,7 @@ impl PixelRegion {
         };
         let invalid = || {
             failure(
-                "换算长图选区",
+                "换算录制选区",
                 format_args!("选区超出所共享显示器的 {width}×{height} 逻辑范围"),
             )
         };

@@ -29,7 +29,7 @@ pub enum PinshotError {
 
     /// 屏幕共享、视频帧读取或滚动拼接失败
     #[cfg(feature = "longshot")]
-    #[error("滚动长图失败: {0}")]
+    #[error("屏幕录制失败: {0}")]
     Longshot(String),
 
     /// 未找到指定历史或贴图记录

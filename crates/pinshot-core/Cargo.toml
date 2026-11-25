@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-longshot = ["dep:ashpd", "dep:futures-util", "dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "dep:tokio"]
+longshot = ["dep:ashpd", "dep:futures-util", "dep:gif", "dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "dep:tokio"]
 
 [dependencies]
 ashpd = { workspace = true, optional = true }
@@ -15,6 +15,7 @@ chrono.workspace = true
 crc32fast.workspace = true
 dirs.workspace = true
 futures-util = { workspace = true, optional = true }
+gif = { workspace = true, optional = true }
 gstreamer = { workspace = true, optional = true }
 gstreamer-app = { workspace = true, optional = true }
 gstreamer-video = { workspace = true, optional = true }

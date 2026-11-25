@@ -102,7 +102,7 @@
 | `SetSystemHidden(hidden)` | `b` | `b` | 长图录制等系统流程临时避让隐藏旧贴图，结束后还原原显隐态 |
 | `UnghostAll()` | 无 | `u`（解除数量） | 一键解除全部贴图的点击穿透 |
 | `ListActivePins()` | 无 | `s`（JSON 数组） | 查询当前活跃贴图 ID、位置、缩放与状态 |
-| `ChooseCapture(output_fd, default_action, offered_actions)` | `h`, `s`, `as` | `d`, `s`, `(iiii)` | 静态截图写入 PNG；连续采集返回 `0`、动作（`longshot` 或 `longshot-horizontal`）与原选区。仅展示 CLI 声明支持的采集动作。取消返回 `0` 与空动作 |
+| `ChooseCapture(output_fd, default_action, offered_actions)` | `h`, `s`, `as` | `d`, `s`, `(iiii)` | 静态截图写入 PNG；连续采集返回 `0`、动作（`longshot`、`longshot-horizontal` 或 `gif`）与原选区。仅展示 CLI 声明支持的采集动作。取消返回 `0` 与空动作 |
 | `ChooseScreenshot(output_fd, default_action, offer_longshot)` | `h`, `s`, `b` | `d`, `s`, `(iiii)` | 兼容入口，只提供纵向长截图 |
 | `SelectScreenshot(output_fd, default_action)` | `h`, `s` | `d`, `s` | 兼容旧版 CLI，只提供静态截图动作；取消返回 `0` 与空字符串 |
 | `CaptureScreenshot(output_fd)` | `h` | `d` | 兼容旧版 CLI，仅确认选区并返回倍率；取消返回 `0` |
@@ -112,9 +112,11 @@
 | `SelectLongshot(monitor_x, monitor_y, monitor_width, monitor_height)` | `i`, `i`, `i`, `i` | `u`, `u`, `u`, `u` | 在 Portal 授权的显示器内框选，返回屏内逻辑坐标；宽高为 `0` 表示取消 |
 | `SelectLongshotRegion(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `u`, `u`, `u`, `u` | 在授权屏内校验普通截图选区并直接显示录制工具条；选区无效时不进入录制 |
 | `SelectLongshotWithAxis(monitor_x, monitor_y, monitor_width, monitor_height, stage_region, axis)` | `i`, `i`, `i`, `i`, `(iiii)`, `s` | `u`, `u`, `u`, `u` | 按指定轴显示录制工具条；全零选区表示独立入口，仍需框选 |
+| `SelectGif(monitor_x, monitor_y, monitor_width, monitor_height, stage_region)` | `i`, `i`, `i`, `i`, `(iiii)` | `(uuuu)` | 复用框选和录制工具条；全零矩形表示独立入口 |
+| `UpdateGif(seconds, near_limit)` | `u`, `b` | `b` | 向 GIF 工具条发布已录时长和大小警告 |
 | `UpdateLongshot(length, warning)` | `u`, `b` | `b` | 仅接受录制连接发来的拼接轴长度与重叠告警 |
 
-信号 `LongshotAction(s)` 只发给发起录制的连接，携带 `copy`、`pin`、`edit`、`save` 或 `cancel`。Core 仍将旧版的 `finish` 视为贴图。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
+信号 `LongshotAction(s)` 只发给发起录制的连接；长图接受 `copy`、`pin`、`edit`、`save` 或 `cancel`，GIF 只接受 `save` 和 `cancel`。Core 仍将旧版的 `finish` 视为贴图。前端监听该连接消失，用于收回选择器、录制边框和控制条并恢复贴图。
 
 ### 3.2 Core 提供给前端的内部子命令（`pinshot internal ...`）
 前端通过短命子命令将图像处理、保存和历史写入交给 Core：
@@ -287,6 +289,12 @@ cargo run --locked -p pinshot-cli --features longshot -- internal record-longsho
 1. 通过 GNOME Portal 授权一块显示器。用户可在系统选择器勾选记住屏幕；Pinshot 使用并更新 Portal 返回的恢复令牌，不保持共享会话。用 `pinshot longshot --choose-screen` 可显式重新选屏。普通截图工具条的长截图菜单先确定拼接轴，再校验原选区并直接开始录制；独立入口才在授权屏内框选并短时抓取输入。录制期间隐藏既有贴图。
 2. 录制时在固定选区外绘制不接收输入的边框，为向外取整的像素裁剪留出间隙。控制条优先贴在选区下方，放不下则移到另一侧，保证不盖住采集区。控制条显示拼接轴长度与重叠告警；滚动事件仍交给原应用。
 3. 用户选择输出动作后，先关闭取帧和 Portal 会话，再由扩展清理控制条并恢复旧贴图。静态截图与长图共用输出流程；显式保存不依赖自动保存开关。
+
+### 4.7 GIF 录制（`longshot/gifshot.rs`）
+
+- GIF 和长图共用 Portal 授权、单会话租约、原选区换算与框外工具条。GIF 录的是画面随时间的变化，不运行滚动拼接，也不经过贴图交付流程。
+- `gif_encoder.rs` 将每帧量化并压缩，按单调时钟差写入 GIF 延迟。待写帧和临时编码缓冲不会随录制时长增长；GIF 直接写入匿名临时文件，保存时原子发布一份 `.gif`，取消或进程退出则回收文件。
+- 导出以 64 MiB 为上限，始终为 GIF 结束标记留空间。超限时保留已经完整写入的帧；同名导出追加序号。
 
 ---
 

@@ -8,6 +8,8 @@ export const SHORTCUT_ACTIONS = [
         description: '框选正文，滚动后点「完成」'},
     {key: 'pinshot-longshot-choose-screen', title: '滚动长截图：重新选择屏幕', command: 'longshot',
         args: ['--choose-screen'], description: '不使用上次记住的屏幕，打开 GNOME 共享选择器'},
+    {key: 'pinshot-gif', title: '录制 GIF', command: 'gif',
+        description: '框选区域后开始录制，再停止并保存或取消'},
     {key: 'pinshot-toggle-hide', title: '显示／隐藏全部贴图'},
     {key: 'pinshot-restore-last', title: '恢复最近一张贴图', command: 'restore-last'},
     {key: 'pinshot-unghost-all', title: '解除全部点击穿透',

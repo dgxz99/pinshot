@@ -118,6 +118,22 @@ const FRONTEND_IFACE_XML = `
       <arg type="b" direction="in" name="warning"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
+    <method name="SelectGif">
+      <arg type="i" direction="in" name="monitor_x"/>
+      <arg type="i" direction="in" name="monitor_y"/>
+      <arg type="i" direction="in" name="monitor_width"/>
+      <arg type="i" direction="in" name="monitor_height"/>
+      <arg type="(iiii)" direction="in" name="stage_region"/>
+      <arg type="u" direction="out" name="x"/>
+      <arg type="u" direction="out" name="y"/>
+      <arg type="u" direction="out" name="width"/>
+      <arg type="u" direction="out" name="height"/>
+    </method>
+    <method name="UpdateGif">
+      <arg type="u" direction="in" name="seconds"/>
+      <arg type="b" direction="in" name="near_limit"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
     <signal name="LongshotAction">
       <arg type="s" name="action"/>
     </signal>
@@ -274,28 +290,40 @@ export class PinshotDbusService {
     }
 
     async SelectLongshotWithAxisAsync([x, y, width, height, region, axis], invocation) {
+        if (axis !== 'vertical' && axis !== 'horizontal') {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, '无效的长截图拼接方向');
+            return;
+        }
         const initialRegion = region.every(value => value === 0) ? null : region;
         await this._selectLongshot([x, y, width, height], initialRegion, axis, invocation);
     }
 
-    async _selectLongshot(geometry, initialRegion, axis, invocation) {
+    async SelectGifAsync([x, y, width, height, region], invocation) {
+        const initialRegion = region.every(value => value === 0) ? null : region;
+        await this._selectLongshot([x, y, width, height], initialRegion, 'gif', invocation);
+    }
+
+    async _selectLongshot(geometry, initialRegion, mode, invocation) {
         try {
-            if (axis !== 'vertical' && axis !== 'horizontal') {
-                throw new Error('无效的长截图拼接方向');
-            }
             if (this._screenshot.active || nativeScreenshotActive()) {
                 throw new Error('请先完成或取消当前截图或录屏');
             }
             const rect = await this._longshot.select(invocation.get_sender(), invocation.get_connection(),
-                geometry, initialRegion, axis);
+                geometry, initialRegion, mode);
             invocation.return_value(new GLib.Variant('(uuuu)', rect));
         } catch (error) {
-            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, error.message);
+            const code = mode === 'gif' ? 'GifFailed' : 'LongshotFailed';
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.${code}`, error.message);
         }
     }
 
     UpdateLongshotAsync([length, warning], invocation) {
         const updated = this._longshot.update(invocation.get_sender(), length, warning);
+        invocation.return_value(new GLib.Variant('(b)', [updated]));
+    }
+
+    UpdateGifAsync([seconds, nearLimit], invocation) {
+        const updated = this._longshot.update(invocation.get_sender(), seconds, nearLimit, true);
         invocation.return_value(new GLib.Variant('(b)', [updated]));
     }
 
@@ -320,7 +348,7 @@ export class PinshotDbusService {
     async _captureScreenshot(handle, defaultAction, options, replyType, invocation) {
         try {
             if (this._longshot.active) {
-                throw new Error('请先完成或取消长截图');
+                throw new Error('请先完成或取消当前录制');
             }
             const fds = invocation.get_message().get_unix_fd_list();
             if (!fds || handle < 0 || handle >= fds.get_length()) {

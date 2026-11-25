@@ -9,7 +9,8 @@ import {OUTPUT_ACTIONS, parseSelectionShortcut, SELECTION_ACTIONS} from './selec
 
 Gio._promisify(Gio.OutputStream.prototype, 'splice_async');
 
-const RECORD_ACTIONS = [
+const GIF_ACTION = {id: 'gif', label: '录制 GIF'};
+const LONGSHOT_ACTIONS = [
     {id: 'longshot', label: '纵向长截图', icon: 'scrollshot-vertical'},
     {id: 'longshot-horizontal', label: '横向长截图', icon: 'scrollshot-horizontal'},
 ];
@@ -37,12 +38,15 @@ export class PinshotScreenshot {
         if (!initial && defaultAction !== null) {
             throw new Error('无效的截图默认动作');
         }
-        const recordingActions = RECORD_ACTIONS.filter(({id}) => offeredActions.includes(id));
+        const longshotActions = LONGSHOT_ACTIONS.filter(({id}) => offeredActions.includes(id));
         const actions = [];
-        if (recordingActions.length > 1) {
-            actions.push({id: 'longshot-menu', label: '长截图', icon: 'scrollshot', choices: recordingActions});
+        if (longshotActions.length > 1) {
+            actions.push({id: 'longshot-menu', label: '长截图', icon: 'scrollshot', choices: longshotActions});
         } else {
-            actions.push(...recordingActions);
+            actions.push(...longshotActions);
+        }
+        if (offeredActions.includes(GIF_ACTION.id)) {
+            actions.push(GIF_ACTION);
         }
         if (initial) {
             for (const action of OUTPUT_ACTIONS) {
@@ -87,7 +91,7 @@ export class PinshotScreenshot {
                 return CANCELLED;
             }
             const {rect, action} = selection;
-            if (recordingActions.some(({id}) => id === action)) {
+            if (action === GIF_ACTION.id || longshotActions.some(({id}) => id === action)) {
                 return [0, action, rect];
             }
             await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);

@@ -279,14 +279,12 @@ fn cmd_gif(choose_screen: bool, initial_region: Option<capture::StageRegion>) ->
         };
         let limit_reached = recording.limit_reached();
         let path = recording.save(&directory, &output.gif_stem()?)?;
-        if limit_reached {
-            notify::info(
-                "Pinshot",
-                &format!("GIF 达到大小上限，已保存已录部分\n{}", path.display()),
-            );
-        } else if output.notify {
-            notify::info("Pinshot", &format!("GIF 已保存\n{}", path.display()));
-        }
+        let message = if limit_reached {
+            "GIF 达到大小上限，已将录制内容保存到："
+        } else {
+            "GIF 已保存到："
+        };
+        notify::info("Pinshot", &format!("{message}\n{}", path.display()));
         println!("{}", path.display());
         Ok(())
     })();

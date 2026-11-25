@@ -118,12 +118,17 @@ const FRONTEND_IFACE_XML = `
       <arg type="b" direction="in" name="warning"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
-    <method name="SelectGif">
+    <method name="PrepareGif">
+      <arg type="(iiii)" direction="in" name="stage_region"/>
+      <arg type="au" direction="in" name="frame_rates"/>
+      <arg type="u" direction="in" name="default_rate"/>
+      <arg type="u" direction="out" name="selected_rate"/>
+    </method>
+    <method name="BeginGif">
       <arg type="i" direction="in" name="monitor_x"/>
       <arg type="i" direction="in" name="monitor_y"/>
       <arg type="i" direction="in" name="monitor_width"/>
       <arg type="i" direction="in" name="monitor_height"/>
-      <arg type="(iiii)" direction="in" name="stage_region"/>
       <arg type="u" direction="out" name="x"/>
       <arg type="u" direction="out" name="y"/>
       <arg type="u" direction="out" name="width"/>
@@ -298,9 +303,29 @@ export class PinshotDbusService {
         await this._selectLongshot([x, y, width, height], initialRegion, axis, invocation);
     }
 
-    async SelectGifAsync([x, y, width, height, region], invocation) {
-        const initialRegion = region.every(value => value === 0) ? null : region;
-        await this._selectLongshot([x, y, width, height], initialRegion, 'gif', invocation);
+    async PrepareGifAsync([region, frameRates, defaultRate], invocation) {
+        try {
+            if (this._screenshot.active || nativeScreenshotActive()) {
+                throw new Error('请先完成或取消当前截图或录屏');
+            }
+            if (frameRates.length > 8 || !frameRates.includes(defaultRate) || frameRates.some(rate => rate < 1 || rate > 30)) {
+                throw new Error('无效的 GIF 帧率选项');
+            }
+            const rate = await this._longshot.prepareGif(invocation.get_sender(), invocation.get_connection(),
+                region, frameRates, defaultRate);
+            invocation.return_value(new GLib.Variant('(u)', [rate]));
+        } catch (error) {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.GifFailed`, error.message);
+        }
+    }
+
+    BeginGifAsync(geometry, invocation) {
+        try {
+            const rect = this._longshot.beginGif(invocation.get_sender(), geometry);
+            invocation.return_value(new GLib.Variant('(uuuu)', rect));
+        } catch (error) {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.GifFailed`, error.message);
+        }
     }
 
     async _selectLongshot(geometry, initialRegion, mode, invocation) {
@@ -312,8 +337,7 @@ export class PinshotDbusService {
                 geometry, initialRegion, mode);
             invocation.return_value(new GLib.Variant('(uuuu)', rect));
         } catch (error) {
-            const code = mode === 'gif' ? 'GifFailed' : 'LongshotFailed';
-            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.${code}`, error.message);
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.LongshotFailed`, error.message);
         }
     }
 

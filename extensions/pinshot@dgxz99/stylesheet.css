@@ -43,6 +43,30 @@
     background-color: #f37878;
 }
 
+.pinshot-gif-record-button {
+    color: #ff6464;
+}
+
+.pinshot-gif-rate {
+    min-width: 64px;
+    font-size: 12px;
+}
+
+#pinshot-gif-frame-rate-menu {
+    min-width: 88px;
+}
+
+#pinshot-gif-frame-rate-menu .popup-menu-content {
+    padding: 4px;
+    border-radius: 10px;
+}
+
+#pinshot-gif-frame-rate-menu .popup-menu-item {
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
 .pinshot-selection-hint,
 .pinshot-selection-toolbar,
 .pinshot-selection-action-menu,

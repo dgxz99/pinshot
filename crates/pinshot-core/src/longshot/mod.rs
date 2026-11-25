@@ -122,6 +122,21 @@ fn run_capture<T>(
     desktop_selection: Option<ScreenSelection>,
     capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
 ) -> Result<Option<T>> {
+    run_capture_after(
+        desktop_selection,
+        CursorMode::Hidden,
+        async |_| Ok(Some(())),
+        async |connection, screen, ()| capture(connection, screen).await,
+    )
+}
+
+/// 在建立 Portal 会话前完成前端准备，等待期间仍占有唯一录制租约
+fn run_capture_after<T, P>(
+    desktop_selection: Option<ScreenSelection>,
+    cursor_mode: CursorMode,
+    prepare: impl AsyncFnOnce(&zbus::Connection) -> Result<Option<P>>,
+    capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen, P) -> Result<Option<T>>,
+) -> Result<Option<T>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -159,29 +174,40 @@ fn run_capture<T>(
         };
         let permission = desktop_selection.zip(store.as_ref());
         let start = async {
+            let Some(prepared) = prepare(&connection).await? else {
+                return Ok(None);
+            };
             let portal = Screencast::with_connection(connection.clone())
                 .await
                 .map_err(|error| failure("连接 ScreenCast Portal", error))?;
+            if cursor_mode == CursorMode::Embedded {
+                let modes = portal.available_cursor_modes().await
+                    .map_err(|error| failure("查询鼠标捕获能力", error))?;
+                if !modes.contains(CursorMode::Embedded) {
+                    return Err(failure("录入鼠标指针", "当前屏幕共享后端不支持嵌入光标"));
+                }
+            }
             let session = portal
                 .create_session(CreateSessionOptions::default())
                 .await
                 .map_err(|error| failure("创建 ScreenCast 会话", error))?;
-            Ok::<_, PinshotError>((portal, session))
+            Ok::<_, PinshotError>(Some((portal, session, prepared)))
         };
         let outcome = match tokio::select! {
             _ = &mut stop_requested => None,
             result = start => Some(result),
         } {
-            Some(Ok((portal, session))) => {
+            Some(Ok(Some((portal, session, prepared)))) => {
                 let result = tokio::select! {
                     _ = &mut stop_requested => Ok(None),
-                    result = capture_session(&connection, &portal, &session, permission, capture) => result,
+                    result = capture_session(&connection, &portal, &session, permission, cursor_mode,
+                        async |connection, screen| capture(connection, screen, prepared).await) => result,
                 };
                 close_session(&session).await;
                 result
             }
             Some(Err(error)) => Err(error),
-            None => Ok(None),
+            Some(Ok(None)) | None => Ok(None),
         };
         if let Err(error) = connection.close().await {
             eprintln!("[pinshot] 断开录制 D-Bus 连接失败: {error}");
@@ -195,6 +221,7 @@ async fn capture_session<T>(
     portal: &Screencast,
     session: &Session<Screencast>,
     permission: Option<(ScreenSelection, &PinStore)>,
+    cursor_mode: CursorMode,
     capture: impl AsyncFnOnce(&zbus::Connection, SharedScreen) -> Result<Option<T>>,
 ) -> Result<Option<T>> {
     let closed = session
@@ -205,7 +232,7 @@ async fn capture_session<T>(
     let mut options = SelectSourcesOptions::default()
         .set_sources(BitFlags::from_flag(SourceType::Monitor))
         .set_multiple(false)
-        .set_cursor_mode(CursorMode::Hidden);
+        .set_cursor_mode(cursor_mode);
     let permission = permission.filter(|_| portal.version() >= PERSISTENCE_VERSION);
     if let Some((selection, store)) = permission {
         let token = take_restore_token(selection, store)?;

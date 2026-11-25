@@ -1,176 +1,176 @@
-# Pinshot
+<div align="center">
+  <img src="extensions/pinshot@dgxz99/icons/pinshot.svg" width="112" height="112" alt="Pinshot logo" />
+  <h1>Pinshot</h1>
+  <p><strong>Take screenshots, pin references, and record GIFs on GNOME Wayland.</strong></p>
+  <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p><a href="#features">Features</a> · <a href="#installation">Installation</a> · <a href="#quick-start">Quick start</a> · <a href="https://github.com/dgxz99/pinshot/issues">Report an issue</a></p>
+</div>
 
-Pinshot 是一款面向 Wayland 的截图、滚动长截图、GIF 录制和贴图工具。它可以把截图、剪贴板中的图片或文字贴在桌面上，方便对照文档、代码和聊天内容。贴图由 GNOME Shell 扩展绘制，不是普通窗口，不会出现在 `Alt+Tab` 列表里。
+Pin a screenshot, an image, or a copied snippet next to your work so you can refer to it without switching windows. Pins stay above ordinary windows and follow you across workspaces. They’re drawn by GNOME Shell, so they don’t show up in `Alt+Tab`.
 
-目前支持 **GNOME Shell 51（Wayland）**，已在 Arch Linux / GNOME Shell 51.1 上验证。
+**Supported desktop:** GNOME Shell 51 on Wayland. Tested on Arch Linux with GNOME Shell 51.1.
 
-## 安装
+![Pinshot’s adjustable capture area and action toolbar on GNOME Wayland](docs/images/region-capture.png)
 
-先准备以下工具：
+## Features
 
-| 工具 | 用途 |
+| Feature | What it does |
 | --- | --- |
-| GNOME Shell 51、`gnome-extensions` | 运行和管理扩展 |
-| Rust / Cargo、`glib-compile-schemas` | 构建 CLI 和编译扩展设置，开发环境使用 Rust 1.100 |
-| `wl-paste`、`wl-copy`（`wl-clipboard`） | 读取和写入 Wayland 剪贴板 |
-| `pango-view`（Pango） | 将剪贴板文字渲染为贴图 |
-| GNOME ScreenCast Portal、PipeWire、GStreamer | 滚动长截图和 GIF 录制；构建需要 `pkg-config` 和 GStreamer Core、App、Video 开发库，运行需要 `pipewiresrc`、`videorate`、`videoconvert` 插件 |
-| `satty` | 可选，用于标注；已验证 Satty 0.22.0 |
-| `notify-send`（libnotify） | 可选，用于 Pinshot 桌面通知 |
+| Region capture | Freeze the desktop and adjust the selection with eight handles. Copy, save, pin, or annotate it. GNOME’s own `Print` shortcut is unchanged. |
+| Desktop pins | Keep screenshots, clipboard images, and text cards on top. Move or resize them, change opacity, collapse them, or let clicks pass through. |
+| Scrolling capture | Capture a page or scrollable panel vertically or horizontally. Extend either end of the chosen axis without repeating overlapping content. |
+| GIF recording | Choose a frame rate before recording, include the pointer, and stop to save a looping GIF. |
+| Annotation | Open the selection or edit an existing pin in [Satty](https://github.com/Satty-org/Satty). |
 
-Arch Linux 上，长截图和 GIF 录制所需的 Portal 和 GStreamer 组件可通过 `xdg-desktop-portal-gnome`、`pipewire`、`gstreamer`、`gst-plugins-base`、`gst-plugins-base-libs`、`gst-plugin-pipewire` 与 `pkgconf` 软件包提供。
+## Installation
 
-在仓库根目录执行：
+### Requirements
+
+| Dependency | Used for |
+| --- | --- |
+| GNOME Shell 51, `gnome-extensions` | Running and managing the extension |
+| Git, Rust and Cargo (tested with Rust 1.100), a C toolchain, `glib-compile-schemas` | Building the CLI and compiling the extension’s settings schema |
+| `wl-clipboard`, `pango-view` (Pango) | Clipboard access and text cards |
+| GNOME ScreenCast Portal, PipeWire, GStreamer | Scrolling capture and GIF recording. The build needs `pkg-config` and GStreamer Core, App, and Video development files. At runtime, GStreamer needs `pipewiresrc`, `videorate`, and `videoconvert`. |
+| `satty`, `notify-send` (libnotify) | Optional: annotation and desktop notifications |
+
+On Arch Linux, with GNOME and Rust already installed, the other required tools and libraries are available as:
 
 ```bash
+sudo pacman -S --needed git base-devel glib2 wl-clipboard pango xdg-desktop-portal-gnome \
+  pipewire wireplumber gstreamer gst-plugins-base gst-plugins-base-libs gst-plugin-pipewire
+```
+
+Install `satty` and `libnotify` if you want annotation and desktop notifications.
+
+### Build from source
+
+```bash
+git clone https://github.com/dgxz99/pinshot.git
+cd pinshot
 ./scripts/install.sh
 ```
 
-脚本把 CLI 安装到 `~/.local/bin/pinshot`，扩展安装到 `~/.local/share/gnome-shell/extensions/pinshot@dgxz99`。不需要用 `sudo` 运行脚本。首次安装或更新扩展代码后，**注销并重新登录 GNOME**，然后启用并检查：
+Run the installer as your normal user. It installs the CLI at `~/.local/bin/pinshot` and the extension at `~/.local/share/gnome-shell/extensions/pinshot@dgxz99`. **Log out and back in** after the first install or after updating the extension code, then enable it and check the connection:
 
 ```bash
 gnome-extensions enable pinshot@dgxz99
 ~/.local/bin/pinshot ping
 ```
 
-返回 `gnome-shell-51` 表示扩展已在线。下文假设 `~/.local/bin` 已加入 `PATH`；如果 `pinshot` 找不到，就使用 `~/.local/bin/pinshot`。
+A response of `gnome-shell-51` means the extension is online. Add `~/.local/bin` to `PATH` to run the commands below as `pinshot`, or use the full path instead.
 
-开发时可用 `./scripts/install.sh --symlink`，将扩展目录链接到当前源码。更新 Rust 代码后仍需重装 CLI。`--skip-build` 只安装已经构建好的 `target/release/pinshot`，不会编译新代码。
+To update, pull the latest changes and rerun `./scripts/install.sh`. For development, `--symlink` links the extension directory to the checkout. `--skip-build` installs an existing `target/release/pinshot` binary; it does not rebuild it.
 
-## 快速上手
+## Quick start
 
-| 场景 | 默认快捷键 | 等效命令 |
+| Action | Default shortcut | CLI |
 | --- | --- | --- |
-| 区域截图（默认复制） | `Super+Shift+P` | `pinshot capture` |
-| 滚动长截图 | `Super+Shift+L` | `pinshot longshot` |
-| 录制 GIF | 默认未绑定，可在首选项设置 | `pinshot gif` |
-| 把剪贴板图片或文字贴到桌面 | `Super+Shift+V` | `pinshot pin-clipboard` |
-| 解除全部贴图的点击穿透 | `Super+Shift+U` | `pinshot unghost-all` |
-| 截图后进入 Satty 标注 | 未绑定 | `pinshot capture-edit` |
-| 显示或隐藏全部贴图 | 未绑定 | `pinshot toggle-hide` |
-| 恢复最近关闭的一张贴图 | 未绑定 | `pinshot restore-last` |
+| Capture a region | `Super+Shift+P` | `pinshot capture` |
+| Start a vertical scrolling capture | `Super+Shift+L` | `pinshot longshot` |
+| Pin an image or text from the clipboard | `Super+Shift+V` | `pinshot pin-clipboard` |
+| Make all pins respond to clicks again | `Super+Shift+U` | `pinshot unghost-all` |
+| Record a GIF | Not bound | `pinshot gif` |
+| Capture and annotate | Not bound | `pinshot capture-edit` |
+| Show or hide all pins | Not bound | `pinshot toggle-hide` |
+| Restore the most recently closed pin | Not bound | `pinshot restore-last` |
 
-- **区域截图**：在冻结画面上拖出选框，松手后仍可调整。选框旁依次是**长截图、录制 GIF、标注、贴图、保存、取消、复制**；工具条只显示图标。主截图入口按 `Enter` 只复制，不贴图、不保存；× 与 `Esc` 或右键一样取消。点「保存」会直接将 PNG 写到首选项设置的目录，即使关闭了自动保存，也不修改剪贴板。想默认贴图，可用 `pinshot capture-pin`。普通截图不弹共享授权；窗口或整屏截图仍可用 GNOME 自带的 `Print`。
-- **剪贴板贴图**：先在原应用用 `Ctrl+C` 复制文字或图片，再触发贴图。例如复制一段代码，就能把它贴在编辑器旁边。Pinshot 不会接管其他应用的复制快捷键。Pinshot 复制的截图再次贴出时会保留原始大小（大图仍会适屏）。如果用其他工具截的图在高分屏上贴出偏大，可到 Pinshot 首选项「截图 → 剪贴板图片」开启「外部图片按屏幕像素 1:1 显示」。
-- **截图后标注**：运行 `pinshot capture-edit`，框选后按 `Enter` 默认打开 Satty，也可以点工具条上的其他动作。进入 Satty 后，按 `Enter` 保存并复制标注结果；`Esc` 退出且不改变剪贴板。已有贴图则用右键菜单里的「标注编辑 (satty)」，保存后会更新那张贴图。
+`Super` is usually the Windows key. Open preferences with `gnome-extensions prefs pinshot@dgxz99` to change or disable bindings. The preferences UI currently uses Chinese labels; look for **快捷键** (Shortcuts) and **框选内快捷键** (Shortcuts inside the selection).
 
-`Super` 通常是键盘上的 Windows 键。到 **GNOME「扩展」→ Pinshot → 齿轮 →「快捷键」**，可以更改、禁用或恢复默认绑定。也可用 `gnome-extensions prefs pinshot@dgxz99` 打开该面板。若已在 GNOME 系统设置中为同一个命令绑了键，可以继续用原来的绑定，不必再为同一动作配置扩展快捷键。
+### Capture, copy, or pin
 
-**快捷键 → 框选内快捷键**可单独设置复制（默认 `Ctrl+C`）、贴图（默认 `P`）和标注（默认 `E`，打开 Satty）。例如把框选内的「贴图」改为 `Ctrl+T` 后，在选框里会贴出当前选区；退出框选后，`Ctrl+T` 仍按原来的全局设置工作。`Enter` 和 `Esc` 保留给确认和取消。
+1. Press `Super+Shift+P`, drag out a region, and release. Move the selection by dragging inside it, or resize it with the handles.
+2. The toolbar goes from left to right: **Scrolling capture → GIF → Annotate → Pin → Save → Cancel → Copy**. `Enter` copies only; `Esc` or right-click cancels. Save exports a PNG without changing the clipboard. Pin puts the selection on the desktop and copies it. Use `pinshot capture-pin` if you want `Enter` to pin instead.
+3. In the selection, `Ctrl+C` copies, `P` pins, and `E` opens Satty. These three bindings are configurable independently of global shortcuts: for example, set `Ctrl+T` to pin the current selection without changing what `Ctrl+T` does outside it. In Satty, `Enter` saves and copies the annotated capture; `Esc` leaves the clipboard unchanged.
 
-### 滚动长截图
+### Work with pins
 
-1. 在普通截图中框住要滚动的区域，再点工具条最左侧的长截图图标，在下拉菜单中选「纵向长截图」或「横向长截图」。也可按 `Super+Shift+L` 独立进入纵向长截图，或执行 `pinshot longshot --horizontal` 进入横向长截图。
-2. GNOME 弹出共享对话框时，选择页面所在的显示器。勾选记住选择，下次可跳过授权提示。
-3. 从普通截图进入时，授权后按原选区直接录制，不必再次框选。选区必须完整位于授权屏幕内，并为框外工具条留出空间。用独立快捷键进入时，框住正文后点开始图标或按 `Enter`。
-4. 等框旁工具条显示「纵向滚动」或「横向滚动」，再沿所选方向慢慢滚动。纵向可以补齐上方和下方，横向可以补齐左侧和右侧；滚过已截取的内容不会重复拼接。若提示回滚，先回到上一次接上的位置再继续。横向请使用应用自身的横向滚动方式，例如触控板或拖动横向滚动条。
-5. 点标注、贴图、保存或复制图标结束录制并输出；点 × 放弃结果。录制期间已有贴图暂时隐藏，结束后恢复。若启用了全屏避让，退出全屏后才能看到所在屏幕上的贴图。
+Copy an image or some text in any app and press `Super+Shift+V`. Pinshot doesn’t take over the app’s `Ctrl+C`. A screenshot copied by Pinshot keeps its original display size when pinned again, subject to fit-to-screen for large images. For external images on scaled displays, the clipboard image settings under **截图** (Screenshots) offer a device-pixel 1:1 option.
 
-长截图也能录制代码框等容器的内部滚动。能识别的固定标题和底边只保留一次，细滚动条不参与匹配。若选区包含多个独立滚动区、宽侧栏或持续变化的浮层，建议收紧到实际滚动的正文。
-
-想换屏时，运行 `pinshot longshot --choose-screen`，或在「快捷键」里为「滚动长截图：重新选择屏幕」设置按键。显示器不再可用或授权被撤销时，GNOME 会重新询问。记住选择不会让 Pinshot 在后台继续录屏。
-
-长截图一次只录制一个显示器。静止和回滚不会重复拼接。框选后蓝色边框固定在屏幕上，不挡滚动；边框和控制条都不会被截进长图。达到 24,000 像素高或内存上限时会自动完成；从 GNOME 停止共享则会取消本次录制。
-
-### 录制 GIF
-
-1. 在普通截图中框选区域，点长截图右边的摄像机图标。原选区会变成蓝框，工具条停在 `00:00`，这时还没有共享屏幕或开始录制。也可以运行 `pinshot gif`，框选后按 `Enter` 确认区域。
-2. 点帧率下拉，可选 **5、10、16、24、30 FPS**（默认 10）。点红色圆形按钮才请求 GNOME 共享屏幕；授权后沿原选区开始录制，不用再框一次。GIF 与长截图共用记住的屏幕授权，且不能同时运行。要换授权屏幕，用 `pinshot gif --choose-screen`。
-3. 开始录制后，红框与计时会提示当前状态。点方形停止按钮即保存，点 × 则丢弃。输出为循环播放的 `.gif`。保存成功后会通知完整文件路径，不修改剪贴板，也不进贴图历史。GIF 和 Pinshot 截图共用「截图 → 保存目录」和文件名前缀；同名时追加序号。
-
-GIF 会录入选区内的鼠标指针，不录制声音。帧率是采样上限，实际帧数取决于屏幕更新。大选区会等比缩小，长边不超过 1280 像素、总像素数不超过 1280×720。没有固定时长上限；文件接近 64 MiB 时工具条会提醒，达到上限时自动保存已录部分。若从 GNOME 停止共享，则取消本次录制。
-
-### 操作贴图
-
-| 操作 | 如何触发 |
+| Action | Gesture |
 | --- | --- |
-| 选中并置顶 / 移动 | 左键单击 / 左键拖动 |
-| 关闭并保留历史 | 左键双击或单击中键 |
-| 缩放 / 调不透明度 | 滚轮 / `Ctrl+滚轮` |
-| 复制、标注、保存、恢复原尺寸 | 右键打开操作菜单 |
-| 收起或展开迷你态 | 右键菜单，或贴图收到键盘事件时按 `Shift+R` |
-| 开启点击穿透 | 右键菜单，或贴图收到键盘事件时按 `T` |
+| Select and bring forward / move | Left-click / drag |
+| Close and keep in history | Double-click or middle-click |
+| Zoom / change opacity | Scroll / `Ctrl`+scroll |
+| Copy, annotate, save, or reset the size | Right-click for the menu |
+| Collapse or expand a pin | Right-click menu or `Shift+R` |
+| Enable click-through | Right-click menu or `T` |
 
-贴图收到键盘事件时，还可用 `Ctrl+C` 复制图片、`E` 标注、`0` 恢复 100%、`Esc` 关闭。如果按键仍进入后方的应用，使用贴图右键菜单即可。穿透后贴图不再接收点击，按 `Super+Shift+U` 或运行 `pinshot unghost-all` 恢复。
+When a pin receives keyboard input, `Ctrl+C` copies it, `E` opens Satty, `0` resets its size, and `Esc` closes it. If another window is receiving the keys, use the pin’s right-click menu instead. Once click-through is enabled, use `Super+Shift+U` or `pinshot unghost-all` to regain mouse control. By default, pins on a display temporarily hide when an app goes fullscreen there.
 
-## 截图保存与通知
+### Capture scrolling content
 
-打开扩展首选项的 **「截图」** 页：
+1. Select the area in a normal capture, then choose vertical or horizontal from the leftmost toolbar button. You can also start a dedicated capture with `pinshot longshot` or `pinshot longshot --horizontal`.
+2. Choose the monitor in GNOME’s screen-sharing dialog. A normal capture reuses the selection after authorization; the dedicated command asks you to select the area on the shared monitor. The whole selection must fit on that monitor, with room outside it for the controls.
+3. Scroll along the selected axis in either direction. If Pinshot asks you to scroll back, return to where stitching last succeeded, then continue with smaller steps. For something like a scrollable code block, select the content and leave unrelated sidebars or overlays out of the frame.
+4. Choose Annotate, Pin, Save, or Copy to finish, or click × to discard. The controls and capture border stay out of the output. Capture finishes automatically when the scrolling axis reaches 24,000 pixels or the memory limit is reached.
 
-- **自动保存到目录**：默认关闭。截图贴图仍保留在历史缓存，但不会额外导出 PNG；需要长期保留时，可右键「保存原图」。开启后，截图贴图和滚动长截图会自动导出原图，截图后标注只导出确认后的标注图。
-- **保存目录**：可填绝对路径或 `~/` 开头的路径。留空使用配置文件中的 `general.save_dir`，默认是 `~/Pictures/Pinshots`。
-- **文件名前缀**：默认 `pinshot`。自动保存和手动「保存原图」都会加上保存时的本地时间，如 `pinshot-20261121-214530.png`。同一秒重名会追加 `-1`、`-2`，不会覆盖已有文件。
-- **显示截图完成通知**：默认关闭，只控制从 Pinshot 发起的截图完成通知；不影响 GIF 保存成功的路径通知、手动保存提示，也不影响直接按 `Print` 时 GNOME 自己的保存或通知。
+GNOME can remember the shared monitor. To choose a different one, use `pinshot longshot --choose-screen`. GIF recording shares this authorization and cannot run at the same time as scrolling capture. Pinshot closes the screen-sharing session when it’s done. Stopping sharing from GNOME cancels the capture in progress.
 
-修改目录或文件名前缀后，点击输入框旁的应用按钮保存设置。从旧版更新时，原先的默认目录值会按新默认值使用；自定义目录不变，旧图不会被移动。
+### Record a GIF
 
-## 缓存、配置和历史
+1. Choose the camera icon in a normal capture, or run `pinshot gif` and confirm a region. The blue outline and `00:00` timer mean it’s ready, not recording.
+2. Choose **5, 10, 16, 24, or 30 FPS** (default: 10). Click the red circle to start the screen-sharing flow. If you need a different monitor, use `pinshot gif --choose-screen`.
+3. When the outline turns red and the timer runs, click the square stop button to save, or × to discard. Saving shows the full file path in a desktop notification when `notify-send` is available. It does not copy the GIF to the clipboard or add it to pin history.
 
-| 内容 | 默认位置 |
+GIFs loop and include the pointer, but not audio. The chosen FPS is a sampling ceiling, not a promise that the screen will update that often. Large selections are scaled proportionally to a longest edge of 1,280 pixels and a total area of at most 1,280 × 720 pixels. There is no fixed time limit; at 64 MiB Pinshot saves the portion already recorded.
+
+## Saving and settings
+
+Open **截图** (Screenshots) in the extension preferences:
+
+| Setting | Behavior |
 | --- | --- |
-| 历史缓存 | `~/.cache/pinshot/`；设置了 `XDG_CACHE_HOME` 时使用 `$XDG_CACHE_HOME/pinshot/` |
-| Core 配置 | `~/.config/pinshot/config.toml`；设置了 `XDG_CONFIG_HOME` 时使用 `$XDG_CONFIG_HOME/pinshot/config.toml` |
-| 扩展快捷键和截图设置 | GNOME 的 Pinshot 首选项（GSettings） |
-| 导出的永久截图 | 默认 `~/Pictures/Pinshots/`，可在首选项中覆盖 |
+| Save directory (保存目录) | Shared by Pinshot PNGs and GIFs. Use an absolute path or one starting with `~/`, then click Apply next to the field. A blank field uses `general.save_dir` in the Core configuration, which defaults to `~/Pictures/Pinshots`. |
+| Filename prefix (文件名前缀) | Defaults to `pinshot`. Filenames include the local save time, such as `pinshot-20261121-214530.png`. A suffix like `-1` avoids overwriting another file. |
+| Automatically save to disk (自动保存到目录) | Off by default. Enable it to also export results you pin or confirm in Satty. Copy still only copies. Explicit Save and GIF stopping work with the toggle off. |
+| Screenshot completion notifications (显示截图完成通知) | Off by default. Does not control GIF save notifications, explicit save notifications, or GNOME’s own `Print` workflow. |
 
-用 `pinshot status` 查看实际缓存路径、历史条数和前端状态。缓存里 `images/` 放原图，`thumbs/` 放缩略图，`texts/` 放文字贴图的原文，`index.json` 是历史索引。缓存里的文件名使用内部编号，不是导出文件名；也不要把历史缓存当作永久相册。
+### Cache and history
 
-默认缓存策略是 **200 MB、14 天**，优先清理非活跃条目。可在 `config.toml` 的 `[cache]` 下调整 `max_size_mb` 和 `max_age_days`。默认不会在下次登录时自动重新弹出贴图，仍可运行 `pinshot restore-last` 找回最近一张。
+`pinshot status` reports the frontend status, cache and configuration paths, and pin counts. Cache files live under `~/.cache/pinshot/` (or `$XDG_CACHE_HOME/pinshot/`). The default targets are 200 MB and 14 days, with inactive pins cleaned up first. Pins aren’t reopened automatically on login unless you enable `restore_on_startup`; use `pinshot restore-last` to recover a recent pin still in the cache.
 
 ```bash
-pinshot clear-history       # 清理缓存历史，保留活跃贴图
-pinshot clear-history --all # 同时关闭并删除活跃贴图的缓存，不可撤销
+pinshot clear-history       # Clear inactive history, keep active pins
+pinshot clear-history --all # Also close active pins and delete their cached files
 ```
 
-这两条命令都不会删除已经导出到保存目录的 PNG。
+Clearing history is irreversible, but does not delete exported PNG or GIF files.
 
-## 配置文件示例
+<details>
+<summary>Core configuration</summary>
 
-运行一次 `pinshot status` 会在需要时生成 `config.toml`，并打印实际路径。**快捷键、截图自动保存、文件名前缀以及截图完成通知在扩展首选项里改**；下面是配置文件中常用的项目，可按需修改：
+`pinshot status` creates a starter configuration if needed. It lives at `~/.config/pinshot/config.toml` or `$XDG_CONFIG_HOME/pinshot/config.toml`. Here are some settings you can change:
 
 ```toml
 [general]
-save_dir = "~/Pictures/Pinshots"    # 首选项未指定保存目录时使用
-restore_on_startup = false         # 登录时是否恢复上次未关闭的贴图
-notify_on_save = true              # 右键「保存原图」成功后的通知
+save_dir = "~/Pictures/Pinshots"
+restore_on_startup = false
+notify_on_save = true             # Notifications for explicit PNG saves
 
 [cache]
-max_size_mb = 200                   # 缓存大小上限，优先清理非活跃条目
-max_age_days = 14                   # 非活跃条目保留天数
-
-[pin]
-default_opacity = 1.0               # 新贴图的不透明度；1.0 为完全不透明
-min_scale = 0.2                     # 最小缩放比例
-max_scale = 5.0                     # 最大缩放比例
-zoom_step = 0.1                     # 每格滚轮的缩放步长
-opacity_step = 0.08                 # Ctrl+滚轮每格调整的不透明度
-mini_size_px = 64                   # 迷你态尺寸
-hide_on_fullscreen = true           # 全屏应用所在显示器临时隐藏贴图
+max_size_mb = 200
+max_age_days = 14
 
 [text_card]
-theme = "auto"                      # auto、light 或 dark
-max_width_px = 680                  # 文字卡片最大宽度
-max_lines = 80                      # 最多渲染的行数
-prose_font = "Sans 12"              # 普通文字字体
-code_font = "Monospace 11"          # 代码字体
-padding_px = 16                     # 卡片内边距
+theme = "auto"                    # auto, light, or dark
+max_width_px = 680
+max_lines = 80
 ```
 
-例如想让文字卡片始终用深色主题，把 `theme` 改成 `"dark"`，下一次从剪贴板创建文字贴图时生效。`[pin]` 由扩展启用时加载，修改后重新登录 GNOME 即可生效，无需重编项目。
+Text-card settings apply to new cards. The extension reads `[pin]` settings (such as `default_opacity`, `mini_size_px`, and `hide_on_fullscreen`) when it starts. After changing those, log out of GNOME and back in; no rebuild is needed.
 
-## 项目架构
+</details>
 
-| 部分 | 负责什么 |
-| --- | --- |
-| GNOME Shell 扩展（`extensions/pinshot@dgxz99`） | 捕获冻结画面并提供 Pinshot 选框，绘制贴图，处理鼠标操作与全局快捷键，提供首选项 |
-| Rust CLI（`crates/pinshot-cli`） | 提供 `pinshot` 命令，通过会话 D-Bus 与扩展通信 |
-| Rust Core（`crates/pinshot-core`） | 处理图像、剪贴板、Satty 标注、缓存与 PNG 导出 |
+## Troubleshooting and uninstalling
 
-以「截图并贴图」为例：扩展收到快捷键后启动 CLI；CLI 请求扩展打开截图界面；确认后扩展把 PNG 交给 Core，由它更新历史并请求扩展显示贴图。CLI 处理完就退出，不需要额外运行后台守护进程。
+- **The extension is offline:** Verify you’re in a GNOME Shell 51 Wayland session and check `gnome-extensions info pinshot@dgxz99`. If GNOME is still running older extension code, log out and back in.
+- **A shortcut does nothing:** Try the corresponding CLI command first, then check whether the binding is disabled or conflicts with a system shortcut.
+- **Need logs?** Run `journalctl --user -b -o cat | grep -i pinshot`. When [reporting an issue](https://github.com/dgxz99/pinshot/issues), include your GNOME Shell version, whether the session is Wayland, and steps to reproduce it.
+- **Uninstall:** Run `./scripts/uninstall.sh`. It preserves the Core configuration and cache unless you pass `--purge`. Exported files are not removed.
 
-## 排查与卸载
+## Project layout
 
-- `pinshot ping` 失败：确认当前是 GNOME Shell **51** 的 Wayland 会话，运行 `gnome-extensions info pinshot@dgxz99` 查看状态。更新后仍加载旧代码时，注销并重新登录。
-- 快捷键没反应：先用对应的 CLI 命令验证功能，再到扩展首选项检查是否禁用或与系统绑定冲突。
-- 排查扩展错误：运行 `journalctl --user -b -o cat | grep -i pinshot` 查看本次启动的日志。
-- 卸载运行 `./scripts/uninstall.sh`，默认保留缓存和配置；加 `--purge` 会额外删除 Pinshot 的缓存目录和 Core 配置目录。已导出的 PNG 不受影响。
+The [GNOME Shell extension](extensions/pinshot@dgxz99/) handles selections, shortcuts, preferences, and desktop pins. The [Rust CLI](crates/pinshot-cli/) talks to it over the session D-Bus; [Core](crates/pinshot-core/) handles images, clipboard data, caching, and recording. The CLI runs on demand, with no separate Pinshot daemon.
+
+See the [architecture and roadmap](docs/architecture-and-roadmap.md) (in Chinese) for implementation details.

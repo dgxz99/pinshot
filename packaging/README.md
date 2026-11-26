@@ -1,0 +1,78 @@
+# Pinshot 发布与 AUR 打包指南
+
+本文档记录维护者发布 GitHub Release、推送 AUR 包以及配置自定义安装短链的标准流程。
+
+## 1. 本地试打包与验证
+
+在打 tag 之前，可先在本地跑通与 CI 完全一致的发布包组装和安装测试：
+
+```bash
+# 生成 dist/pinshot-v0.1.0-linux-x86_64.tar.gz 与 dist/SHA256SUMS
+./scripts/package-release.sh v0.1.0 --check-version
+
+# 使用刚生成的本地压缩包测试预编译安装路径
+./scripts/install.sh --archive dist/pinshot-v0.1.0-linux-x86_64.tar.gz
+```
+
+也可以在 GitHub 仓库的 **Actions → Release → Run workflow** 手动试跑构建，下载 Artifact 验证 `ubuntu-24.04` 基线产物，不会对外发布正式 Release。
+
+## 2. 发布正式 GitHub Release
+
+1. 确认 [Cargo.toml](../Cargo.toml) 中 `[workspace.package].version` 已更新为目标版本（如 `0.1.0`），并推送到 `main` 等 CI 全部通过。
+2. 创建并推送对应 tag：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) 会自动校验版本号、运行测试、打包并发布 `Pinshot v0.1.0` Release（附带 `.tar.gz` 与 `SHA256SUMS`）。
+
+> 已发布的 tag 和压缩包请勿覆盖重打，以免破坏 AUR 用户的本地缓存校验；如有修复请递增补丁版本号（如 `v0.1.1`）。
+
+## 3. 发布与更新 AUR（`pinshot` / `pinshot-bin`）
+
+本目录提供两个 AUR 包模板：
+- `packaging/aur/pinshot/`：从 GitHub tag 源码离线锁定编译
+- `packaging/aur/pinshot-bin/`：直接拉取 GitHub Release 预编译包
+
+首次推送（以 `pinshot-bin` 为例，`pinshot` 流程完全一致）：
+
+```bash
+# 1. 克隆空 AUR 仓库（AUR 要求使用 master 分支）
+git clone ssh://aur@aur.archlinux.org/pinshot-bin.git /tmp/aur-pinshot-bin
+cd /tmp/aur-pinshot-bin
+
+# 2. 拷贝模板（按需更新第 1 行 # Maintainer 邮箱）
+cp /path/to/pinshot/packaging/aur/pinshot-bin/* .
+
+# 3. 自动下载上游压缩包写入真实 sha256sums，并生成 .SRCINFO
+updpkgsums
+makepkg --printsrcinfo > .SRCINFO
+
+# 4. 本地试构建安装验证后清理临时产物
+makepkg -si
+rm -rf src pkg *.tar.gz *.pkg.tar.*
+
+# 5. 提交并推送
+git add PKGBUILD pinshot-bin.install .SRCINFO
+git commit -m "Initial release v0.1.0"
+git push -u origin master
+```
+
+后续更新原则：
+- **仅调整打包本身**（依赖、安装路径、`.install` 提示）：保持 `pkgver` 不变，递增 `pkgrel`（如 `1` → `2`），重新生成 `.SRCINFO` 后推送。
+- **发布新版本代码**：先发新 GitHub tag（如 `v0.1.1`），再把 `pkgver` 改为 `0.1.1`、`pkgrel` 重置为 `1`，运行 `updpkgsums && makepkg --printsrcinfo > .SRCINFO` 后推送。
+
+## 4. 可选：为 `curl | bash` 配置自定义短域名
+
+默认一键安装直接使用 GitHub Raw 链接：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash
+```
+
+如需更短的自定义域名（以 Cloudflare 托管 `example.com` 为例）：
+1. 在 DNS 新增记录（如 `get.example.com` → `A` `192.0.2.1`，开启橙色 Proxy）。
+2. 在 **Rules → Redirect Rules** 添加 302 重定向规则：将 `https://get.example.com/pinshot` 跳转到 `https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh`。
+3. 用户即可通过 `curl -fsSL https://get.example.com/pinshot | bash` 安装。

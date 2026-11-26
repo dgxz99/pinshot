@@ -54,6 +54,10 @@ const FRONTEND_IFACE_XML = `
       <arg type="h" direction="in" name="output_fd"/>
       <arg type="d" direction="out" name="scale"/>
     </method>
+    <method name="CaptureFullscreen">
+      <arg type="h" direction="in" name="output_fd"/>
+      <arg type="d" direction="out" name="scale"/>
+    </method>
     <method name="SelectScreenshot">
       <arg type="h" direction="in" name="output_fd"/>
       <arg type="s" direction="in" name="default_action"/>
@@ -350,6 +354,27 @@ export class PinshotDbusService {
 
     async CaptureScreenshotAsync([handle], invocation) {
         await this._captureScreenshot(handle, null, {}, '(d)', invocation);
+    }
+
+    async CaptureFullscreenAsync([handle], invocation) {
+        let stream;
+        try {
+            if (this._longshot.active) {
+                throw new Error('请先完成或取消当前录制');
+            }
+            const fd = this._takeUnixFd(invocation, handle, '截图请求缺少有效的输出文件描述符');
+            stream = GioUnix.OutputStream.new(fd, true);
+            const scale = await this._screenshot.captureFullscreen(
+                stream,
+                invocation.get_sender(),
+                invocation.get_connection()
+            );
+            invocation.return_value(new GLib.Variant('(d)', [scale]));
+        } catch (error) {
+            invocation.return_dbus_error(`${FRONTEND_INTERFACE_NAME}.CaptureFailed`, error.message);
+        } finally {
+            stream?.close(null);
+        }
     }
 
     async SelectScreenshotAsync([handle, defaultAction], invocation) {

@@ -179,6 +179,32 @@ pub(crate) fn persist_unique_image(
     }
 }
 
+/// 直接截取指针所在显示器的全屏画面；匿名临时文件只用来传输 PNG
+pub fn capture_fullscreen(frontend: &FrontendClient) -> Result<Option<CapturedImage>> {
+    let temp_dir = std::env::temp_dir();
+    let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
+    let source_scale = frontend.capture_fullscreen(&file)?;
+    if source_scale == 0.0 {
+        return Ok(None);
+    }
+    if !source_scale.is_finite() || source_scale < 0.0 {
+        return Err(PinshotError::Dbus(format!(
+            "无效的截图缩放：{source_scale}"
+        )));
+    }
+    let mut png_bytes = Vec::new();
+    file.rewind()
+        .map_err(|err| PinshotError::io(&temp_dir, err))?;
+    file.read_to_end(&mut png_bytes)
+        .map_err(|err| PinshotError::io(&temp_dir, err))?;
+    Ok(Some(CapturedImage {
+        action: ScreenshotAction::Copy,
+        png_bytes,
+        source_scale,
+        initial_position: None,
+    }))
+}
+
 /// 打开 Pinshot 框选；匿名临时文件只用来传输 PNG，不在截图目录落盘
 pub fn capture_interactive_region(
     frontend: &FrontendClient,

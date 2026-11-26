@@ -1,6 +1,7 @@
 /** 扩展首选项、GSettings 与全局快捷键注册共用的操作清单 */
 export const SHORTCUT_ACTIONS = [
     {key: 'pinshot-capture-pin', title: '区域截图', command: 'capture', allowInPopup: true},
+    {key: 'pinshot-capture-fullscreen', title: '截取当前全屏', command: 'capture-fullscreen', allowInPopup: true},
     {key: 'pinshot-pin-clipboard', title: '剪贴板贴图', command: 'pin-clipboard',
         description: '先在原应用复制文字或图片，再按此快捷键'},
     {key: 'pinshot-capture-edit', title: '区域截图后标注', command: 'capture-edit', allowInPopup: true},

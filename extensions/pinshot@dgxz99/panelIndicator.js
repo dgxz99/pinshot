@@ -17,7 +17,7 @@ export class PinshotPanelIndicator {
         this._settings = settings;
         this._pinManager = pinManager;
         this._callbacks = callbacks;
-        this._pendingIdleIds = new Set();
+        this._pendingTimerIds = new Set();
 
         this._button = new PanelMenu.Button(0.0, 'Pinshot', false);
         this._button.add_style_class_name('pinshot-panel-button');
@@ -52,6 +52,7 @@ export class PinshotPanelIndicator {
         const menu = this._button.menu;
 
         menu.addAction('区域截图', () => this._launchAfterClose(['capture']));
+        menu.addAction('截取当前全屏', () => this._launchAfterClose(['capture-fullscreen']));
         menu.addAction('纵向长截图', () => this._launchAfterClose(['longshot']));
         menu.addAction('横向长截图', () => this._launchAfterClose(['longshot', '--horizontal']));
         menu.addAction('录制 GIF', () => this._launchAfterClose(['gif']));
@@ -84,17 +85,22 @@ export class PinshotPanelIndicator {
         });
     }
 
-    /** 截图/录制类命令先关闭菜单并等待事件循环空闲，避免下拉菜单被冻进截图或抢占模态输入 */
+    /** 立即中止菜单淡出动画并等待合成器重绘数帧，避免下拉菜单被冻进截图画面 */
     _launchAfterClose(args) {
+        const menuActor = this._button.menu.actor;
+        menuActor.remove_all_transitions();
+        menuActor.hide();
+        menuActor.opacity = 255;
         this._button.menu.close(false);
-        const idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            this._pendingIdleIds.delete(idleId);
+
+        const timerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+            this._pendingTimerIds.delete(timerId);
             if (this._button) {
                 firePinshot(args);
             }
             return GLib.SOURCE_REMOVE;
         });
-        this._pendingIdleIds.add(idleId);
+        this._pendingTimerIds.add(timerId);
     }
 
     _refreshDynamicItems() {
@@ -111,10 +117,10 @@ export class PinshotPanelIndicator {
     }
 
     destroy() {
-        for (const idleId of this._pendingIdleIds) {
-            GLib.Source.remove(idleId);
+        for (const timerId of this._pendingTimerIds) {
+            GLib.Source.remove(timerId);
         }
-        this._pendingIdleIds.clear();
+        this._pendingTimerIds.clear();
 
         if (this._iconStyleId) {
             this._settings.disconnect(this._iconStyleId);

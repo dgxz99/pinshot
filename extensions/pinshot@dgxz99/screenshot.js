@@ -1,6 +1,8 @@
+import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {CANCEL_ACTION} from './actionIcons.js';
@@ -116,10 +118,68 @@ export class PinshotScreenshot {
         }
     }
 
+    /** 直接截取指针所在的当前显示器全屏，并播放短暂闪屏反馈 */
+    async captureFullscreen(stream, owner, connection) {
+        if (this.active || nativeScreenshotActive()) {
+            throw new Error('请先完成或取消当前截图');
+        }
+        if (Main.sessionMode.isLocked) {
+            return 0;
+        }
+        const monitor = Main.layoutManager.currentMonitor ?? Main.layoutManager.primaryMonitor;
+        if (!monitor) {
+            throw new Error('无法定位当前显示器');
+        }
+        const session = {selector: null, cancellable: new Gio.Cancellable()};
+        this._session = session;
+        try {
+            session.watch = Gio.bus_watch_name_on_connection(connection, owner, Gio.BusNameWatcherFlags.NONE,
+                null, () => this._cancel(session));
+            const [content, scale] = await new Shell.Screenshot().screenshot_stage_to_content();
+            if (session.cancellable.is_cancelled() || nativeScreenshotActive()) {
+                return 0;
+            }
+            const rect = [monitor.x, monitor.y, monitor.width, monitor.height];
+            this._flashMonitor(monitor);
+            await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);
+            return session.cancellable.is_cancelled() ? 0 : scale;
+        } catch (error) {
+            if (session.cancellable.is_cancelled()) {
+                return 0;
+            }
+            throw error;
+        } finally {
+            this._cancel(session);
+            if (session.watch) {
+                Gio.bus_unwatch_name(session.watch);
+            }
+            this._session = null;
+        }
+    }
+
+    _flashMonitor(monitor) {
+        const flash = new St.Widget({
+            x: monitor.x,
+            y: monitor.y,
+            width: monitor.width,
+            height: monitor.height,
+            reactive: false,
+            style: 'background-color: white;',
+            opacity: 110,
+        });
+        Main.layoutManager.uiGroup.add_child(flash);
+        flash.ease({
+            opacity: 0,
+            duration: 180,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => flash.destroy(),
+        });
+    }
+
     /** Surface 与 stage 共用原点，裁剪边界向外取整并限制在纹理内 */
     async _writeSelection(texture, scale, [x, y, width, height], stream, cancellable) {
-        const left = Math.floor(x * scale);
-        const top = Math.floor(y * scale);
+        const left = Math.max(0, Math.floor(x * scale));
+        const top = Math.max(0, Math.floor(y * scale));
         const right = Math.min(texture.get_width(), Math.ceil((x + width) * scale));
         const bottom = Math.min(texture.get_height(), Math.ceil((y + height) * scale));
         if (right <= left || bottom <= top) {

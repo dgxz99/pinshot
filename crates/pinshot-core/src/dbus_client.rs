@@ -28,6 +28,7 @@ trait Frontend1 {
     fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
     fn set_clipboard_png(&self, input_fd: Fd<'_>, length: u32) -> zbus::Result<()>;
     fn capture_screenshot(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
+    fn capture_fullscreen(&self, output_fd: Fd<'_>) -> zbus::Result<f64>;
     fn choose_capture(
         &self,
         output_fd: Fd<'_>,
@@ -143,6 +144,16 @@ impl FrontendClient {
             result => result
                 .map(|(scale, action)| (scale, action, empty))
                 .map_err(map_zbus_err),
+        }
+    }
+
+    /// 直接截取当前显示器全屏；旧版扩展未实现时提示更新并重登
+    pub(crate) fn capture_fullscreen(&self, output: &File) -> Result<f64> {
+        match self.proxy.capture_fullscreen(Fd::from(output.as_fd())) {
+            Err(ref error) if unknown_method(error) => Err(PinshotError::Dbus(
+                "当前运行的 GNOME Shell 扩展版本不支持全屏截图，请更新扩展并重新登录".into(),
+            )),
+            result => result.map_err(map_zbus_err),
         }
     }
 

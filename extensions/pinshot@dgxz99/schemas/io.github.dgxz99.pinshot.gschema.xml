@@ -4,6 +4,9 @@
     <key name="pinshot-capture-pin" type="as">
       <default>['&lt;Super&gt;&lt;Shift&gt;p']</default>
     </key>
+    <key name="pinshot-capture-fullscreen" type="as">
+      <default>[]</default>
+    </key>
     <key name="pinshot-pin-clipboard" type="as">
       <default>['&lt;Super&gt;&lt;Shift&gt;v']</default>
     </key>

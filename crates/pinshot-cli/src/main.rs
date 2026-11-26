@@ -33,6 +33,8 @@ enum Commands {
     Status,
     /// 打开区域截图工具条，默认复制截图
     Capture,
+    /// 直接截取当前显示器全屏并复制到剪贴板（按设置自动保存或通知）
+    CaptureFullscreen,
     /// 区域截屏，默认贴图
     CapturePin,
     /// 区域截屏并在 Satty 标注，确认后复制图片
@@ -124,6 +126,7 @@ fn main() -> Result<()> {
         Commands::Ping => cmd_ping(),
         Commands::Status => cmd_status(),
         Commands::Capture => cmd_capture(ScreenshotAction::Copy),
+        Commands::CaptureFullscreen => cmd_capture_fullscreen(),
         Commands::CapturePin => cmd_capture(ScreenshotAction::Pin),
         Commands::CaptureEdit => cmd_capture(ScreenshotAction::Edit),
         #[cfg(feature = "longshot")]
@@ -175,6 +178,23 @@ fn cmd_status() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn cmd_capture_fullscreen() -> Result<()> {
+    capture_fullscreen().inspect_err(|error| {
+        notify::warn("Pinshot 全屏截图失败", &format!("{error:#}"));
+    })
+}
+
+fn capture_fullscreen() -> Result<()> {
+    let frontend = FrontendClient::connect()?;
+    let Some(captured) = capture::capture_fullscreen(&frontend)? else {
+        return Ok(());
+    };
+    let cfg = Config::load_or_init()?;
+    let output = frontend.screenshot_settings()?;
+    clipboard::copy_png_bytes(&frontend, &captured.png_bytes, captured.source_scale)?;
+    finish_screenshot(&cfg, &output, &captured.png_bytes, "已复制全屏截图到剪贴板")
 }
 
 fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {

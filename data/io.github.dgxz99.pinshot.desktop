@@ -11,12 +11,17 @@ Terminal=false
 Categories=Utility;GTK;
 Keywords=screenshot;pin;gif;longshot;wayland;截图;贴图;长截图;
 StartupNotify=true
-Actions=capture;pin-clipboard;longshot;gif;
+Actions=capture;capture-fullscreen;pin-clipboard;longshot;gif;
 
 [Desktop Action capture]
 Name=Capture Region
 Name[zh_CN]=区域截图
 Exec=pinshot capture
+
+[Desktop Action capture-fullscreen]
+Name=Capture Fullscreen
+Name[zh_CN]=截取当前全屏
+Exec=pinshot capture-fullscreen
 
 [Desktop Action pin-clipboard]
 Name=Pin Clipboard

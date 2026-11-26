@@ -50,11 +50,7 @@ pub fn record_desktop(
     initial_region: Option<StageRegion>,
     axis: ScrollAxis,
 ) -> Result<Option<(Recording, ScreenshotAction)>> {
-    let selection = if choose_screen {
-        ScreenSelection::Choose
-    } else {
-        ScreenSelection::Remembered
-    };
+    let selection = ScreenSelection::from_choose(choose_screen);
     run_capture(Some(selection), async |connection, screen| {
         let monitor = screen.monitor;
         let (x, y, width, height) = screen.logical_geometry()?;

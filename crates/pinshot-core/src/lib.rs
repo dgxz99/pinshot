@@ -4,7 +4,7 @@ pub mod clipboard;
 mod clipboard_png;
 pub mod config;
 pub mod dbus_client;
-pub mod desktop;
+mod desktop;
 pub mod error;
 #[cfg(feature = "longshot")]
 pub mod longshot;

@@ -19,6 +19,12 @@ const CURSORS = [
     [Clutter.CursorType.SW_RESIZE, Clutter.CursorType.S_RESIZE, Clutter.CursorType.SE_RESIZE],
 ];
 
+function isPointerEvent(type) {
+    return type === Clutter.EventType.MOTION ||
+        type === Clutter.EventType.BUTTON_PRESS ||
+        type === Clutter.EventType.BUTTON_RELEASE;
+}
+
 export const CANCELLED_REGION = [0, 0, 0, 0];
 
 /** 保留可调整的选区，只有确认或取消才结束模态并归还输入 */
@@ -89,8 +95,12 @@ export class RegionSelector {
     }
 
     _createToolbar() {
-        const toolbar = new St.BoxLayout({name: 'pinshot-selection-toolbar',
-            style_class: 'pinshot-selection-toolbar', reactive: true, visible: false});
+        const toolbar = new St.BoxLayout({
+            name: 'pinshot-selection-toolbar',
+            style_class: 'pinshot-selection-toolbar',
+            reactive: true,
+            visible: false,
+        });
         toolbar.set_cursor_type(Clutter.CursorType.DEFAULT);
         for (const action of this._actions) {
             const button = createActionButton('pinshot-selection-action', action, () => {
@@ -115,8 +125,12 @@ export class RegionSelector {
         if (!monitor) {
             return;
         }
-        const menu = new St.BoxLayout({name: 'pinshot-selection-action-menu',
-            orientation: Clutter.Orientation.VERTICAL, style_class: 'pinshot-selection-action-menu', reactive: true});
+        const menu = new St.BoxLayout({
+            name: 'pinshot-selection-action-menu',
+            orientation: Clutter.Orientation.VERTICAL,
+            style_class: 'pinshot-selection-action-menu',
+            reactive: true,
+        });
         menu.set_cursor_type(Clutter.CursorType.DEFAULT);
         for (const choice of choices) {
             menu.add_child(createActionButton('pinshot-selection-choice', choice,
@@ -154,9 +168,7 @@ export class RegionSelector {
                 return Clutter.EVENT_STOP;
             }
         }
-        const pointer = type === Clutter.EventType.MOTION || type === Clutter.EventType.BUTTON_PRESS ||
-            type === Clutter.EventType.BUTTON_RELEASE;
-        const target = pointer ? global.stage.get_event_actor(event) : global.stage.get_key_focus();
+        const target = isPointerEvent(type) ? global.stage.get_event_actor(event) : global.stage.get_key_focus();
         if (target && this._actionMenu.contains(target)) {
             return Clutter.EVENT_PROPAGATE;
         }
@@ -178,8 +190,7 @@ export class RegionSelector {
             this._onKey(event);
         } else if (type === Clutter.EventType.BUTTON_PRESS && event.get_button() === Clutter.BUTTON_SECONDARY) {
             this.close();
-        } else if (type === Clutter.EventType.MOTION || type === Clutter.EventType.BUTTON_PRESS ||
-            type === Clutter.EventType.BUTTON_RELEASE) {
+        } else if (isPointerEvent(type)) {
             if (!this._drag && this._toolbar.visible) {
                 const target = global.stage.get_event_actor(event);
                 if (target && this._toolbar.contains(target)) {

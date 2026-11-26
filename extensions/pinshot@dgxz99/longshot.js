@@ -147,15 +147,23 @@ export class LongshotController {
                 session.selector = null;
                 stageRegion = selection.rect;
             }
-            const monitor = Main.layoutManager.monitors.find(candidate =>
-                initialRegionOnMonitor(stageRegion, candidate, screenBounds(candidate), MIN_EDGE));
+            let monitor = null;
+            let localRect = null;
+            for (const candidate of Main.layoutManager.monitors) {
+                const candidateRect = initialRegionOnMonitor(stageRegion, candidate, screenBounds(candidate), MIN_EDGE);
+                if (candidateRect) {
+                    monitor = candidate;
+                    localRect = candidateRect;
+                    break;
+                }
+            }
             if (!monitor) {
                 throw new Error('GIF 选区必须完整位于同一显示器内，且至少为 32×32');
             }
             session.stageRegion = stageRegion;
             session.workArea = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
             session.phase = 'ready';
-            this._showOutline(session, monitor, initialRegionOnMonitor(stageRegion, monitor, screenBounds(monitor), MIN_EDGE));
+            this._showOutline(session, monitor, localRect);
             this._showHud(session, stageRegion);
             return await new Promise(resolve => {
                 session.confirmGif = resolve;

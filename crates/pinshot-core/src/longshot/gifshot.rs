@@ -52,13 +52,8 @@ pub fn record_gif(
     initial_region: Option<StageRegion>,
     directory: &Path,
 ) -> Result<Option<GifRecording>> {
-    let selection = if choose_screen {
-        ScreenSelection::Choose
-    } else {
-        ScreenSelection::Remembered
-    };
     run_capture_after(
-        Some(selection),
+        Some(ScreenSelection::from_choose(choose_screen)),
         CursorMode::Embedded,
         async |connection| {
             let frontend = GifFrontendProxy::new(connection)
@@ -115,7 +110,7 @@ pub fn record_gif(
             let mut encoder = None;
             let mut started = None;
             let mut last_slot = None;
-            let (sender, mut receiver) = watch::channel(None);
+            let (sender, receiver) = watch::channel(None);
             tokio::select! {
                 biased;
                 action = actions.next() => {
@@ -127,15 +122,10 @@ pub fn record_gif(
                         other => return Err(failure("接收 GIF 操作", other)),
                     }
                 }
-                result = async {
-                    while receiver.changed().await.is_ok() {
-                        let Some((seconds, near_limit)) = *receiver.borrow_and_update() else { continue };
-                        if !frontend.update_gif(seconds, near_limit).await.map_err(|error| failure("更新 GIF 工具条", error))? {
-                            return Err(failure("更新 GIF 工具条", "录制界面已关闭"));
-                        }
-                    }
-                    Err(failure("更新 GIF 工具条", "状态通道已关闭"))
-                } => return result,
+                result = publish_progress(&frontend, receiver) => {
+                    result?;
+                    return Err(failure("更新 GIF 工具条", "状态通道已关闭"));
+                }
                 result = screen.read_at_rate(None, frame_rate as i32, |frame| {
                     let now = Instant::now();
                     let elapsed = now.duration_since(*started.get_or_insert(now));
@@ -175,6 +165,25 @@ pub fn record_gif(
                 .map(Some)
         },
     )
+}
+
+async fn publish_progress(
+    frontend: &GifFrontendProxy<'_>,
+    mut states: watch::Receiver<Option<(u32, bool)>>,
+) -> Result<()> {
+    while states.changed().await.is_ok() {
+        let Some((seconds, near_limit)) = *states.borrow_and_update() else {
+            continue;
+        };
+        let updated = frontend
+            .update_gif(seconds, near_limit)
+            .await
+            .map_err(|error| failure("更新 GIF 工具条", error))?;
+        if !updated {
+            return Err(failure("更新 GIF 工具条", "录制界面已关闭"));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

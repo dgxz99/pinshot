@@ -23,7 +23,6 @@ trait Frontend1 {
     fn set_pin_temporary_hidden(&self, id: &str, hidden: bool) -> zbus::Result<bool>;
     fn close_pin(&self, id: &str) -> zbus::Result<bool>;
     fn toggle_hide_all(&self) -> zbus::Result<bool>;
-    fn set_system_hidden(&self, hidden: bool) -> zbus::Result<bool>;
     fn unghost_all(&self) -> zbus::Result<u32>;
     fn list_active_pins(&self) -> zbus::Result<String>;
     fn get_clipboard_image_scale(&self) -> zbus::Result<f64>;
@@ -95,11 +94,6 @@ impl FrontendClient {
     /// 一键切换全部贴图的隐藏/显示状态，返回切换后是否处于隐藏态
     pub fn toggle_hide_all(&self) -> Result<bool> {
         self.proxy.toggle_hide_all().map_err(map_zbus_err)
-    }
-
-    /// 系统流程（如长图录制）临时隐藏或还原已有贴图
-    pub fn set_system_hidden(&self, hidden: bool) -> Result<bool> {
-        self.proxy.set_system_hidden(hidden).map_err(map_zbus_err)
     }
 
     /// 一键解除全部贴图的点击穿透，返回解除数量

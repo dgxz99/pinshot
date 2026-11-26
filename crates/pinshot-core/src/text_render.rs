@@ -1,10 +1,8 @@
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::{TextCardConfig, TextCardTheme};
-use crate::desktop::{detect_color_scheme, detect_display_scale, ColorScheme};
+use crate::desktop::{ColorScheme, detect_color_scheme, detect_display_scale};
 use crate::error::{PinshotError, Result};
 
 /// 渲染完成后的文字卡片结果
@@ -47,7 +45,7 @@ pub fn render_text_card(raw_text: &str, cfg: &TextCardConfig) -> Result<Rendered
 }
 
 /// 可注入主题与缩放倍率的渲染入口（便于测试与外部指定环境参数）
-pub fn render_text_card_with_env(
+fn render_text_card_with_env(
     raw_text: &str,
     cfg: &TextCardConfig,
     scheme: ColorScheme,
@@ -79,9 +77,10 @@ pub fn render_text_card_with_env(
         cfg.prose_font.as_str()
     };
 
-    let guard = TempRenderFiles::create()?;
-    fs::write(&guard.input_path, markup.as_bytes())
-        .map_err(|e| PinshotError::io(&guard.input_path, e))?;
+    let temp = tempfile::tempdir().map_err(|e| PinshotError::io(std::env::temp_dir(), e))?;
+    let input_path = temp.path().join("card.pango");
+    let output_path = temp.path().join("card.png");
+    fs::write(&input_path, markup.as_bytes()).map_err(|e| PinshotError::io(&input_path, e))?;
 
     let output = Command::new("pango-view")
         .arg("--no-display")
@@ -95,8 +94,8 @@ pub fn render_text_card_with_env(
         .arg(format!("--font={font}"))
         .arg("--line-spacing=1.22")
         .arg("-o")
-        .arg(&guard.output_path)
-        .arg(&guard.input_path)
+        .arg(&output_path)
+        .arg(&input_path)
         .output()
         .map_err(|e| PinshotError::ExternalCommand {
             cmd: "pango-view".to_string(),
@@ -111,8 +110,7 @@ pub fn render_text_card_with_env(
         });
     }
 
-    let png_bytes =
-        fs::read(&guard.output_path).map_err(|e| PinshotError::io(&guard.output_path, e))?;
+    let png_bytes = fs::read(&output_path).map_err(|e| PinshotError::io(&output_path, e))?;
 
     Ok(RenderedTextCard {
         png_bytes,
@@ -123,14 +121,14 @@ pub fn render_text_card_with_env(
 }
 
 /// 统一换行符、将 Tab 转为 4 空格并剔除尾部多余空行
-pub fn normalize_text(raw: &str) -> String {
+fn normalize_text(raw: &str) -> String {
     let unified = raw.replace("\r\n", "\n").replace('\r', "\n");
     let expanded = unified.replace('\t', "    ");
     expanded.trim_end_matches('\n').to_string()
 }
 
 /// 基于缩进比例、代码关键字与符号密度自动判断文本是否为代码
-pub fn detect_code(text: &str) -> bool {
+fn detect_code(text: &str) -> bool {
     let non_empty_lines: Vec<&str> = text
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -185,7 +183,10 @@ pub fn detect_code(text: &str) -> bool {
             indented_lines += 1;
         }
         let trimmed = line.trim();
-        if CODE_PREFIXES.iter().any(|prefix| trimmed.starts_with(prefix)) {
+        if CODE_PREFIXES
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
+        {
             keyword_hits += 1;
         }
         if trimmed.ends_with(';') || trimmed.ends_with('{') || trimmed.ends_with('}') {
@@ -193,7 +194,10 @@ pub fn detect_code(text: &str) -> bool {
         }
     }
 
-    let token_hits: usize = CODE_TOKENS.iter().map(|tok| text.matches(tok).count()).sum();
+    let token_hits: usize = CODE_TOKENS
+        .iter()
+        .map(|tok| text.matches(tok).count())
+        .sum();
     let total_lines = non_empty_lines.len();
 
     if keyword_hits >= 1 && (token_hits >= 1 || total_lines >= 2) {
@@ -213,7 +217,7 @@ pub fn detect_code(text: &str) -> bool {
 }
 
 /// 按最大行数截断展示内容；超出时返回总行数以便追加截断提示
-pub fn truncate_lines(text: &str, max_lines: usize) -> (String, Option<usize>) {
+fn truncate_lines(text: &str, max_lines: usize) -> (String, Option<usize>) {
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() <= max_lines {
         return (text.to_string(), None);
@@ -224,7 +228,7 @@ pub fn truncate_lines(text: &str, max_lines: usize) -> (String, Option<usize>) {
 }
 
 /// 转义 Pango XML 特殊字符并剔除非换行控制字符，防止 `pango-view --markup` 报错
-pub fn escape_pango_markup(text: &str) -> String {
+fn escape_pango_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 32);
     for ch in text.chars() {
         match ch {
@@ -252,7 +256,7 @@ fn build_pango_markup(body: &str, truncated_total: Option<usize>, muted_color: &
 }
 
 /// 提取首行非空文本作为顶栏与历史摘要（最多 40 个字符）
-pub fn build_title_preview(text: &str) -> String {
+fn build_title_preview(text: &str) -> String {
     let first = text
         .lines()
         .map(str::trim)
@@ -266,35 +270,6 @@ pub fn build_title_preview(text: &str) -> String {
         format!("{prefix}…")
     } else {
         prefix
-    }
-}
-
-struct TempRenderFiles {
-    input_path: PathBuf,
-    output_path: PathBuf,
-}
-
-impl TempRenderFiles {
-    fn create() -> Result<Self> {
-        let dir = std::env::temp_dir();
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let input_path = dir.join(format!("pinshot-text-{pid}-{nanos}.pango"));
-        let output_path = dir.join(format!("pinshot-text-{pid}-{nanos}.png"));
-        Ok(Self {
-            input_path,
-            output_path,
-        })
-    }
-}
-
-impl Drop for TempRenderFiles {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.input_path);
-        let _ = fs::remove_file(&self.output_path);
     }
 }
 
@@ -340,7 +315,8 @@ mod tests {
 
     #[test]
     fn build_title_preview_handles_multibyte_chinese_safely() {
-        let long = "这是一段非常非常长的中文标题摘要内容用于验证按字符截断而不是按字节截断的安全性检查";
+        let long =
+            "这是一段非常非常长的中文标题摘要内容用于验证按字符截断而不是按字节截断的安全性检查";
         let preview = build_title_preview(long);
         assert!(preview.ends_with('…'));
         assert_eq!(preview.chars().count(), 41);

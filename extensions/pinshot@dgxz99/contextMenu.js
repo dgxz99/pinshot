@@ -124,10 +124,7 @@ export class PinContextMenu {
         }
 
         if (this._anchor) {
-            const parent = this._anchor.get_parent();
-            if (parent) {
-                parent.remove_child(this._anchor);
-            }
+            this._anchor.get_parent()?.remove_child(this._anchor);
             this._anchor.destroy();
             this._anchor = null;
         }

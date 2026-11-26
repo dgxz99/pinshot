@@ -111,14 +111,10 @@ pub fn detect_display_scale() -> f64 {
 /// 解码 `file://` URI 为本地文件系统路径（支持 `file:///...`、`file://localhost/...` 与 UTF-8 百分号编码）
 pub fn decode_file_uri(uri: &str) -> Option<PathBuf> {
     let trimmed = uri.trim();
-    let rest = if let Some(path) = trimmed.strip_prefix("file://localhost/") {
-        format!("/{path}")
-    } else {
-        let path = trimmed.strip_prefix("file:///")?;
-        format!("/{path}")
-    };
-
-    let decoded = percent_decode_utf8(&rest)?;
+    let path = trimmed
+        .strip_prefix("file://localhost/")
+        .or_else(|| trimmed.strip_prefix("file:///"))?;
+    let decoded = percent_decode_utf8(&format!("/{path}"))?;
     Some(PathBuf::from(decoded))
 }
 

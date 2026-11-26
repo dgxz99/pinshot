@@ -18,17 +18,12 @@ impl std::str::FromStr for LogicalRegion {
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
         const INVALID: &str = "选区应为 x,y,宽,高（非负整数，宽、高不能为零）";
-        let numbers = value.split(',').map(|part| part.trim().parse::<u32>());
-        let [x, y, width, height] = numbers
-            .collect::<Vec<_>>()
-            .try_into()
+        let parsed: Vec<u32> = value
+            .split(',')
+            .map(|part| part.trim().parse::<u32>())
+            .collect::<std::result::Result<_, _>>()
             .map_err(|_| INVALID)?;
-        let (x, y, width, height) = (
-            x.map_err(|_| INVALID)?,
-            y.map_err(|_| INVALID)?,
-            width.map_err(|_| INVALID)?,
-            height.map_err(|_| INVALID)?,
-        );
+        let [x, y, width, height] = parsed.try_into().map_err(|_| INVALID)?;
         if width == 0 || height == 0 {
             return Err(INVALID);
         }

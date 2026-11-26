@@ -236,16 +236,18 @@ impl Config {
 
 /// 展开路径开头的 `~` 或 `~/`
 pub fn expand_tilde(raw: &str) -> Result<PathBuf> {
-    if raw == "~" {
-        return dirs::home_dir()
-            .ok_or_else(|| PinshotError::HomeDir("无法获取用户 HOME 目录".to_string()));
+    let Some(rest) = raw.strip_prefix('~') else {
+        return Ok(PathBuf::from(raw));
+    };
+    if !rest.is_empty() && !rest.starts_with('/') {
+        return Ok(PathBuf::from(raw));
     }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        let home = dirs::home_dir()
-            .ok_or_else(|| PinshotError::HomeDir("无法获取用户 HOME 目录".to_string()))?;
-        return Ok(home.join(rest));
-    }
-    Ok(PathBuf::from(raw))
+    let home = dirs::home_dir()
+        .ok_or_else(|| PinshotError::HomeDir("无法获取用户 HOME 目录".to_string()))?;
+    Ok(match rest.strip_prefix('/') {
+        Some(sub) => home.join(sub),
+        None => home,
+    })
 }
 
 #[cfg(test)]

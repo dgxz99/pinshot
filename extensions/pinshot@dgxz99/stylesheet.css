@@ -75,6 +75,9 @@
     background-color: rgba(27, 27, 33, 0.98);
     border: 1px solid rgba(255, 255, 255, 0.20);
     border-radius: 10px;
+}
+
+.pinshot-selection-hint {
     padding: 6px 10px;
     spacing: 8px;
 }

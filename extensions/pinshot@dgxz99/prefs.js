@@ -122,6 +122,13 @@ export default class PinshotPreferences extends ExtensionPreferences {
         settings.bind('screenshot-auto-save', autoSave, 'active', Gio.SettingsBindFlags.DEFAULT);
         group.add(autoSave);
 
+        const notify = new Adw.SwitchRow({
+            title: '显示截图完成通知',
+            subtitle: '只控制截图流程的成功通知，不影响 GNOME 自带截图。',
+        });
+        settings.bind('screenshot-notify', notify, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(notify);
+
         const location = new Adw.PreferencesGroup({
             title: '保存位置和文件名',
             description: '目录可用绝对路径或 ~/，留空沿用 Pinshot 的配置。文件名自动加上本地保存时间，例如 pinshot-20261121-214530.png；同一秒重名时再加序号。',
@@ -134,12 +141,6 @@ export default class PinshotPreferences extends ExtensionPreferences {
             row.connect('apply', () => settings.set_string(key, row.text.trim()));
             location.add(row);
         }
-        const notify = new Adw.SwitchRow({
-            title: '显示截图完成通知',
-            subtitle: '只控制截图流程的成功通知，不影响 GNOME 自带截图。',
-        });
-        settings.bind('screenshot-notify', notify, 'active', Gio.SettingsBindFlags.DEFAULT);
-        group.add(notify);
         const clipboard = new Adw.PreferencesGroup({title: '剪贴板图片'});
         const devicePixels = new Adw.SwitchRow({
             title: '外部图片按屏幕像素 1:1 显示',

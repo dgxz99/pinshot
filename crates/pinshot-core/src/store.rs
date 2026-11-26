@@ -21,10 +21,19 @@ const THUMB_MAX_EDGE: u32 = 128;
 static ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 持久化索引结构（`index.json`）
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoreIndex {
     version: u32,
     entries: Vec<PinRecord>,
+}
+
+impl StoreIndex {
+    fn empty() -> Self {
+        Self {
+            version: 1,
+            entries: Vec::new(),
+        }
+    }
 }
 
 /// 单条贴图与历史缓存记录
@@ -99,19 +108,19 @@ impl PinStore {
         &self.root_dir
     }
 
-    pub fn images_dir(&self) -> PathBuf {
+    fn images_dir(&self) -> PathBuf {
         self.root_dir.join("images")
     }
 
-    pub fn thumbs_dir(&self) -> PathBuf {
+    fn thumbs_dir(&self) -> PathBuf {
         self.root_dir.join("thumbs")
     }
 
-    pub fn texts_dir(&self) -> PathBuf {
+    fn texts_dir(&self) -> PathBuf {
         self.root_dir.join("texts")
     }
 
-    pub fn index_path(&self) -> PathBuf {
+    fn index_path(&self) -> PathBuf {
         self.root_dir.join("index.json")
     }
 
@@ -146,7 +155,7 @@ impl PinStore {
     }
 
     /// 指定时间戳的新增条目实现（便于测试双阈值淘汰逻辑）
-    pub fn add_png_entry_at(
+    fn add_png_entry_at(
         &self,
         req: NewEntryRequest<'_>,
         cache_cfg: &CacheConfig,
@@ -198,9 +207,7 @@ impl PinStore {
 
         let mut index = self.load_index()?;
         index.entries.push(record.clone());
-        let max_bytes = cache_cfg.max_size_mb.saturating_mul(1024 * 1024);
-        let max_age_secs = cache_cfg.max_age_days.saturating_mul(86_400);
-        prune_index_entries(&mut index.entries, now, max_bytes, max_age_secs);
+        prune_with_config(&mut index.entries, now, cache_cfg);
         self.save_index(&index)?;
 
         Ok(record)
@@ -286,9 +293,7 @@ impl PinStore {
         target.size_bytes = new_png_bytes.len() as u64 + thumb_bytes.len() as u64 + text_bytes;
 
         let updated = target.clone();
-        let max_bytes = cache_cfg.max_size_mb.saturating_mul(1024 * 1024);
-        let max_age_secs = cache_cfg.max_age_days.saturating_mul(86_400);
-        prune_index_entries(&mut index.entries, now, max_bytes, max_age_secs);
+        prune_with_config(&mut index.entries, now, cache_cfg);
         self.save_index(&index)?;
 
         Ok(updated)
@@ -312,20 +317,13 @@ impl PinStore {
 
     fn set_active_state(&self, id: &str, active: bool) -> Result<bool> {
         let mut index = self.load_index()?;
-        let now = unix_now_secs();
-        let mut changed = false;
-        for entry in &mut index.entries {
-            if entry.id == id {
-                entry.active = active;
-                entry.last_used_at = now;
-                changed = true;
-                break;
-            }
-        }
-        if changed {
-            self.save_index(&index)?;
-        }
-        Ok(changed)
+        let Some(entry) = index.entries.iter_mut().find(|entry| entry.id == id) else {
+            return Ok(false);
+        };
+        entry.active = active;
+        entry.last_used_at = unix_now_secs();
+        self.save_index(&index)?;
+        Ok(true)
     }
 
     /// 获取所有当前标记为 `active = true` 的记录（按 `last_used_at` 升序，用于启动恢复）
@@ -429,56 +427,46 @@ impl PinStore {
     /// 清除已提交给 Portal 或失效的 ScreenCast restore_token
     pub fn clear_screencast_token(&self) -> Result<()> {
         let path = self.screencast_token_path();
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(PinshotError::io(&path, error)),
-        }
+        remove_if_exists(&path).map_err(|error| PinshotError::io(&path, error))
     }
 
     fn load_index(&self) -> Result<StoreIndex> {
         let path = self.index_path();
-        if !path.exists() {
-            return Ok(StoreIndex {
-                version: 1,
-                entries: Vec::new(),
-            });
-        }
-        let content = fs::read_to_string(&path).map_err(|e| PinshotError::io(&path, e))?;
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(StoreIndex::empty());
+            }
+            Err(err) => return Err(PinshotError::io(&path, err)),
+        };
         if content.trim().is_empty() {
-            return Ok(StoreIndex {
-                version: 1,
-                entries: Vec::new(),
-            });
+            return Ok(StoreIndex::empty());
         }
-        let index: StoreIndex = serde_json::from_str(&content)?;
-        Ok(index)
+        Ok(serde_json::from_str(&content)?)
     }
 
-    /// 原子写入 `index.json`：先写同目录临时文件并刷新落盘，再 `rename` 替换目标
+    /// 原子写入 `index.json`：先写同目录 `0600` 临时文件并刷新落盘，再 `rename` 替换目标
     fn save_index(&self, index: &StoreIndex) -> Result<()> {
         self.ensure_layout()?;
         let target = self.index_path();
-        let pid = std::process::id();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp_path = self.root_dir.join(format!(".index.json.tmp.{pid}.{nanos}"));
-
         let serialized = serde_json::to_vec_pretty(index)?;
-        {
-            let mut file =
-                fs::File::create(&tmp_path).map_err(|e| PinshotError::io(&tmp_path, e))?;
-            file.write_all(&serialized)
-                .map_err(|e| PinshotError::io(&tmp_path, e))?;
-            file.sync_all()
-                .map_err(|e| PinshotError::io(&tmp_path, e))?;
-        }
-        set_unix_mode(&tmp_path, 0o600)?;
-        fs::rename(&tmp_path, &target).map_err(|e| PinshotError::io(&target, e))?;
+        let mut temp = tempfile::NamedTempFile::new_in(&self.root_dir)
+            .map_err(|e| PinshotError::io(&target, e))?;
+        temp.write_all(&serialized)
+            .map_err(|e| PinshotError::io(temp.path(), e))?;
+        temp.as_file()
+            .sync_all()
+            .map_err(|e| PinshotError::io(temp.path(), e))?;
+        temp.persist(&target)
+            .map_err(|e| PinshotError::io(&target, e.error))?;
         Ok(())
     }
+}
+
+fn prune_with_config(entries: &mut Vec<PinRecord>, now: u64, cache_cfg: &CacheConfig) {
+    let max_bytes = cache_cfg.max_size_mb.saturating_mul(1024 * 1024);
+    let max_age_secs = cache_cfg.max_age_days.saturating_mul(86_400);
+    prune_index_entries(entries, now, max_bytes, max_age_secs);
 }
 
 /// 执行双阈值自动淘汰：保护活跃贴图，先按过期天数清理，再按总容量淘汰最旧非活跃条目
@@ -491,36 +479,35 @@ fn prune_index_entries(
     let mut removed_count = 0;
 
     // 1. 先淘汰超过保留天数的非活跃条目
-    let mut remaining = Vec::with_capacity(entries.len());
-    for entry in entries.drain(..) {
+    entries.retain(|entry| {
         let expired = !entry.active && now.saturating_sub(entry.last_used_at) > max_age_secs;
         if expired {
-            remove_record_files(&entry);
+            remove_record_files(entry);
             removed_count += 1;
+            false
         } else {
-            remaining.push(entry);
+            true
         }
-    }
+    });
 
     // 2. 再检查总占用容量，超限时按 last_used_at 从旧到新淘汰非活跃条目
-    let mut total_bytes: u64 = remaining.iter().map(|e| e.size_bytes).sum();
+    let mut total_bytes: u64 = entries.iter().map(|e| e.size_bytes).sum();
     if total_bytes > max_bytes {
-        let mut evictable_indices: Vec<usize> = remaining
+        let mut evictable_indices: Vec<usize> = entries
             .iter()
             .enumerate()
             .filter(|(_, e)| !e.active)
             .map(|(idx, _)| idx)
             .collect();
 
-        evictable_indices
-            .sort_by_key(|&idx| (remaining[idx].last_used_at, remaining[idx].created_at));
+        evictable_indices.sort_by_key(|&idx| (entries[idx].last_used_at, entries[idx].created_at));
 
         let mut to_remove = HashSet::new();
         for idx in evictable_indices {
             if total_bytes <= max_bytes {
                 break;
             }
-            let entry = &remaining[idx];
+            let entry = &entries[idx];
             remove_record_files(entry);
             total_bytes = total_bytes.saturating_sub(entry.size_bytes);
             removed_count += 1;
@@ -528,17 +515,15 @@ fn prune_index_entries(
         }
 
         if !to_remove.is_empty() {
-            let mut filtered = Vec::with_capacity(remaining.len() - to_remove.len());
-            for (idx, entry) in remaining.into_iter().enumerate() {
-                if !to_remove.contains(&idx) {
-                    filtered.push(entry);
-                }
-            }
-            remaining = filtered;
+            let mut idx = 0;
+            entries.retain(|_| {
+                let keep = !to_remove.contains(&idx);
+                idx += 1;
+                keep
+            });
         }
     }
 
-    *entries = remaining;
     removed_count
 }
 

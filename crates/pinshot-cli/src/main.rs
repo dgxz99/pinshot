@@ -268,30 +268,31 @@ fn edit_screenshot(frontend: &FrontendClient, captured: &CapturedImage) -> Resul
 
 #[cfg(feature = "longshot")]
 fn cmd_gif(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
-    let result = (|| -> Result<()> {
-        let output = FrontendClient::connect()?.screenshot_settings()?;
-        let directory = output.export_dir(&Config::load_or_init()?)?;
-        output.gif_stem()?;
-        let Some(recording) =
-            pinshot_core::longshot::record_gif(choose_screen, initial_region, &directory)?
-        else {
-            return Ok(());
-        };
-        let limit_reached = recording.limit_reached();
-        let path = recording.save(&directory, &output.gif_stem()?)?;
-        let message = if limit_reached {
-            "GIF 达到大小上限，已将录制内容保存到："
-        } else {
-            "GIF 已保存到："
-        };
-        notify::info("Pinshot", &format!("{message}\n{}", path.display()));
-        println!("{}", path.display());
-        Ok(())
-    })();
-    if let Err(error) = &result {
+    gif(choose_screen, initial_region).inspect_err(|error| {
         notify::warn("Pinshot", &format!("GIF 录制失败：{error}"));
-    }
-    result
+    })
+}
+
+#[cfg(feature = "longshot")]
+fn gif(choose_screen: bool, initial_region: Option<capture::StageRegion>) -> Result<()> {
+    let output = FrontendClient::connect()?.screenshot_settings()?;
+    let directory = output.export_dir(&Config::load_or_init()?)?;
+    output.gif_stem()?;
+    let Some(recording) =
+        pinshot_core::longshot::record_gif(choose_screen, initial_region, &directory)?
+    else {
+        return Ok(());
+    };
+    let limit_reached = recording.limit_reached();
+    let path = recording.save(&directory, &output.gif_stem()?)?;
+    let message = if limit_reached {
+        "GIF 达到大小上限，已将录制内容保存到："
+    } else {
+        "GIF 已保存到："
+    };
+    notify::info("Pinshot", &format!("{message}\n{}", path.display()));
+    println!("{}", path.display());
+    Ok(())
 }
 
 #[cfg(feature = "longshot")]
@@ -380,13 +381,11 @@ fn edit_existing_pin(id: &str) -> Result<()> {
         }
         Ok(())
     })();
-    let restore_result = (|| -> Result<()> {
-        anyhow::ensure!(
-            frontend.set_pin_temporary_hidden(id, false)?,
-            "无法恢复贴图显示: {id}"
-        );
-        Ok(())
-    })();
+    let restore_result = match frontend.set_pin_temporary_hidden(id, false) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::anyhow!("无法恢复贴图显示: {id}")),
+        Err(err) => Err(err.into()),
+    };
     match (edit_result, restore_result) {
         (Err(edit), Err(restore)) => Err(edit.context(format!("恢复贴图显示也失败: {restore:#}"))),
         (Err(err), _) | (_, Err(err)) => Err(err),

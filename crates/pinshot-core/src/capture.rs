@@ -186,22 +186,27 @@ pub fn capture_interactive_region(
     let mut file = tempfile::tempfile().map_err(|err| PinshotError::io(&temp_dir, err))?;
     let (source_scale, action, region) =
         frontend.select_screenshot(&file, default_action.as_str())?;
-    let axis = match action.as_str() {
-        "longshot" => Some(ScrollAxis::Vertical),
-        "longshot-horizontal" => Some(ScrollAxis::Horizontal),
-        _ => None,
-    };
-    if let Some(axis) = axis {
-        if cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0 {
-            return Ok(Some(ScreenshotSelection::Longshot(region, axis)));
+    let valid_region =
+        cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0;
+    match action.as_str() {
+        "longshot" if valid_region => {
+            return Ok(Some(ScreenshotSelection::Longshot(
+                region,
+                ScrollAxis::Vertical,
+            )));
         }
-        return Err(PinshotError::Dbus("前端返回无效的长截图选区".into()));
-    }
-    if action == "gif" {
-        if cfg!(feature = "longshot") && source_scale == 0.0 && region.2 > 0 && region.3 > 0 {
-            return Ok(Some(ScreenshotSelection::Gif(region)));
+        "longshot-horizontal" if valid_region => {
+            return Ok(Some(ScreenshotSelection::Longshot(
+                region,
+                ScrollAxis::Horizontal,
+            )));
         }
-        return Err(PinshotError::Dbus("前端返回无效的 GIF 选区".into()));
+        "longshot" | "longshot-horizontal" => {
+            return Err(PinshotError::Dbus("前端返回无效的长截图选区".into()));
+        }
+        "gif" if valid_region => return Ok(Some(ScreenshotSelection::Gif(region))),
+        "gif" => return Err(PinshotError::Dbus("前端返回无效的 GIF 选区".into())),
+        _ => {}
     }
     if source_scale == 0.0 {
         return Ok(None);

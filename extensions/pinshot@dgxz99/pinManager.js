@@ -179,53 +179,62 @@ export class PinManager {
             this._selectPin(null);
             return Clutter.EVENT_PROPAGATE;
         }
-        if (event.type() === Clutter.EventType.BUTTON_PRESS) {
+
+        const type = event.type();
+        if (type === Clutter.EventType.BUTTON_PRESS) {
             const [x, y] = event.get_coords();
             const hit = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
             if (hit !== pin.actor || event.get_button() === Clutter.BUTTON_SECONDARY) {
                 this._selectPin(null);
             }
-        } else if (event.type() === Clutter.EventType.KEY_PRESS &&
-            global.stage.get_key_focus() === pin.actor) {
-            const key = event.get_key_symbol();
-            const modifiers = event.get_state() & (Clutter.ModifierType.CONTROL_MASK |
-                Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK |
-                Clutter.ModifierType.SUPER_MASK);
-            if (key === Clutter.KEY_c && modifiers === Clutter.ModifierType.CONTROL_MASK) {
-                firePinshot(['internal', 'copy-image', pin.id]);
-                return Clutter.EVENT_STOP;
-            }
-            if ((key === Clutter.KEY_r || key === Clutter.KEY_R) &&
-                modifiers === Clutter.ModifierType.SHIFT_MASK) {
-                if (!(event.get_flags() & Clutter.EventFlags.FLAG_REPEATED)) {
-                    pin.toggleMini();
-                }
-                return Clutter.EVENT_STOP;
-            }
-            if (modifiers !== 0) {
-                return Clutter.EVENT_PROPAGATE;
-            }
-            switch (key) {
-            case Clutter.KEY_e:
-                this._selectPin(null);
-                firePinshot(['internal', 'edit-satty', pin.id]);
-                break;
-            case Clutter.KEY_t:
-                this._selectPin(null);
-                pin.setGhost(true);
-                break;
-            case Clutter.KEY_0:
-                pin.resetScaleTo100();
-                break;
-            case Clutter.KEY_Escape:
-                this.closePin(pin.id, {notifyCore: true});
-                break;
-            default:
-                return Clutter.EVENT_PROPAGATE;
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        if (type !== Clutter.EventType.KEY_PRESS || global.stage.get_key_focus() !== pin.actor) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        const key = event.get_key_symbol();
+        const modifiers = event.get_state() & (
+            Clutter.ModifierType.CONTROL_MASK |
+            Clutter.ModifierType.SHIFT_MASK |
+            Clutter.ModifierType.MOD1_MASK |
+            Clutter.ModifierType.SUPER_MASK
+        );
+        if (key === Clutter.KEY_c && modifiers === Clutter.ModifierType.CONTROL_MASK) {
+            firePinshot(['internal', 'copy-image', pin.id]);
+            return Clutter.EVENT_STOP;
+        }
+        if ((key === Clutter.KEY_r || key === Clutter.KEY_R) &&
+            modifiers === Clutter.ModifierType.SHIFT_MASK) {
+            if (!(event.get_flags() & Clutter.EventFlags.FLAG_REPEATED)) {
+                pin.toggleMini();
             }
             return Clutter.EVENT_STOP;
         }
-        return Clutter.EVENT_PROPAGATE;
+        if (modifiers !== 0) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        switch (key) {
+        case Clutter.KEY_e:
+            this._selectPin(null);
+            firePinshot(['internal', 'edit-satty', pin.id]);
+            break;
+        case Clutter.KEY_t:
+            this._selectPin(null);
+            pin.setGhost(true);
+            break;
+        case Clutter.KEY_0:
+            pin.resetScaleTo100();
+            break;
+        case Clutter.KEY_Escape:
+            this.closePin(pin.id, {notifyCore: true});
+            break;
+        default:
+            return Clutter.EVENT_PROPAGATE;
+        }
+        return Clutter.EVENT_STOP;
     }
 
     _raisePin(pin) {
@@ -309,10 +318,7 @@ export class PinManager {
         this._pins.clear();
 
         if (this._container) {
-            const parent = this._container.get_parent();
-            if (parent) {
-                parent.remove_child(this._container);
-            }
+            this._container.get_parent()?.remove_child(this._container);
             this._container.destroy();
             this._container = null;
         }

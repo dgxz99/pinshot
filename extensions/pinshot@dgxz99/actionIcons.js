@@ -16,8 +16,14 @@ export function createActionButton(prefix, {id, label, icon = id}, clicked, {sho
         child.add_child(image);
         child.add_child(new St.Label({text: label, y_align: Clutter.ActorAlign.CENTER}));
     }
-    const button = new St.Button({name: `${prefix}-${id}`, child,
-        style_class: 'pinshot-action-button', can_focus: showLabel, reactive: true, track_hover: true});
+    const button = new St.Button({
+        name: `${prefix}-${id}`,
+        child,
+        style_class: 'pinshot-action-button',
+        can_focus: showLabel,
+        reactive: true,
+        track_hover: true,
+    });
     button.set_accessible_name(label);
     button.connect('clicked', clicked);
     return button;

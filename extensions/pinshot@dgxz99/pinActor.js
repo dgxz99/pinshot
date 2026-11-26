@@ -10,6 +10,8 @@ import {PinContextMenu} from './contextMenu.js';
 const DOUBLE_CLICK_MS = 320;
 const DOUBLE_CLICK_MAX_DELTA = 8;
 
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
 /**
  * 单张「真·非窗口」悬浮贴图（挂载在 uiGroup 顶层，严格遵守 4 条内存防泄漏红线）
  */
@@ -33,7 +35,7 @@ export class PinActor {
         this._baseHeight = Math.max(24, Math.round(this._pixelHeight / this._sourceScale));
 
         this._scale = 1.0;
-        this._opacity = this._clampOpacity(this._config.default_opacity ?? 1.0);
+        this._opacity = clamp(this._config.default_opacity ?? 1.0, 0.15, 1.0);
         this._opacityBeforeGhost = this._opacity;
         this._mini = false;
         this._ghost = false;
@@ -76,7 +78,10 @@ export class PinActor {
         this._initGeometry();
         this._loadFullTexture();
         this._applyOpacity(this._opacity);
-        this._bindEvents();
+        this._actorSignalIds = [
+            this.actor.connect('button-press-event', (_actor, event) => this._onButtonPress(event)),
+            this.actor.connect('scroll-event', (_actor, event) => this._onScroll(event)),
+        ];
     }
 
     get mini() {
@@ -85,6 +90,13 @@ export class PinActor {
 
     get ghost() {
         return this._ghost;
+    }
+
+    _scaledSize() {
+        return [
+            Math.max(24, Math.round(this._baseWidth * this._scale)),
+            Math.max(24, Math.round(this._baseHeight * this._scale)),
+        ];
     }
 
     /**
@@ -106,27 +118,16 @@ export class PinActor {
         this._zoomMin = this.kind === 'longshot' ? Math.min(this._config.min_scale, initScale) : this._config.min_scale;
         this._scale = Math.max(this._zoomMin, initScale);
 
-        const w = Math.max(24, Math.round(this._baseWidth * this._scale));
-        const h = Math.max(24, Math.round(this._baseHeight * this._scale));
+        const [w, h] = this._scaledSize();
 
         // 初始弹出尽量完整留在当前显示器工作区内
         const maxX = workArea.x + Math.max(0, workArea.width - w);
         const maxY = workArea.y + Math.max(0, workArea.height - h);
-        const x = Math.min(Math.max(Math.round(ptrX - w / 2), workArea.x), maxX);
-        const y = Math.min(Math.max(Math.round(ptrY - h / 2), workArea.y), maxY);
+        const x = clamp(Math.round(ptrX - w / 2), workArea.x, maxX);
+        const y = clamp(Math.round(ptrY - h / 2), workArea.y, maxY);
 
         this.actor.set_size(w, h);
         this.actor.set_position(x, y);
-    }
-
-    _bindEvents() {
-        this._connectActor('button-press-event', (_actor, event) => this._onButtonPress(event));
-        this._connectActor('scroll-event', (_actor, event) => this._onScroll(event));
-    }
-
-    _connectActor(signal, handler) {
-        const id = this.actor.connect(signal, handler);
-        this._actorSignalIds.push(id);
     }
 
     _onButtonPress(event) {
@@ -266,10 +267,7 @@ export class PinActor {
     }
 
     _zoomAroundPoint(targetScale, anchorStageX, anchorStageY) {
-        const nextScale = Math.min(
-            Math.max(targetScale, this._zoomMin),
-            this._config.max_scale
-        );
+        const nextScale = clamp(targetScale, this._zoomMin, this._config.max_scale);
         if (Math.abs(nextScale - this._scale) < 0.001) {
             return;
         }
@@ -280,8 +278,7 @@ export class PinActor {
         const relY = (anchorStageY - this.actor.y) / oldH;
 
         this._scale = nextScale;
-        const newW = Math.max(24, Math.round(this._baseWidth * this._scale));
-        const newH = Math.max(24, Math.round(this._baseHeight * this._scale));
+        const [newW, newH] = this._scaledSize();
 
         const rawX = Math.round(anchorStageX - relX * newW);
         const rawY = Math.round(anchorStageY - relY * newH);
@@ -335,8 +332,7 @@ export class PinActor {
             if (prev) {
                 this._scale = prev.scale;
             }
-            const w = Math.max(24, Math.round(this._baseWidth * this._scale));
-            const h = Math.max(24, Math.round(this._baseHeight * this._scale));
+            const [w, h] = this._scaledSize();
 
             this._releaseTexture();
             this._loadFullTexture();
@@ -429,8 +425,7 @@ export class PinActor {
             this._loadThumbTexture(miniSize);
         } else {
             this._loadFullTexture();
-            const w = Math.max(24, Math.round(this._baseWidth * this._scale));
-            const h = Math.max(24, Math.round(this._baseHeight * this._scale));
+            const [w, h] = this._scaledSize();
             this.actor.set_size(w, h);
         }
     }
@@ -542,12 +537,8 @@ export class PinActor {
         }
     }
 
-    _clampOpacity(val) {
-        return Math.min(Math.max(val, 0.15), 1.0);
-    }
-
     _applyOpacity(val) {
-        this._opacity = this._clampOpacity(val);
+        this._opacity = clamp(val, 0.15, 1.0);
         if (this.actor) {
             this.actor.opacity = Math.round(this._opacity * 255);
         }
@@ -589,8 +580,8 @@ export class PinActor {
             maxY = Math.max(maxY, m.y + m.height);
         }
 
-        const clampedX = Math.min(Math.max(x, minX - width + edge), maxX - edge);
-        const clampedY = Math.min(Math.max(y, minY - height + edge), maxY - edge);
+        const clampedX = clamp(x, minX - width + edge, maxX - edge);
+        const clampedY = clamp(y, minY - height + edge, maxY - edge);
 
         // 检查钳制后是否仍与任意显示器相交（处理非矩形多屏排列的死角）
         const overlapsAny = monitors.some(m => {
@@ -606,8 +597,8 @@ export class PinActor {
 
         // 回退拉回主屏可见区域
         const primary = Main.layoutManager.primaryMonitor ?? monitors[0];
-        const safeX = Math.min(Math.max(clampedX, primary.x), primary.x + Math.max(0, primary.width - edge));
-        const safeY = Math.min(Math.max(clampedY, primary.y), primary.y + Math.max(0, primary.height - edge));
+        const safeX = clamp(clampedX, primary.x, primary.x + Math.max(0, primary.width - edge));
+        const safeY = clamp(clampedY, primary.y, primary.y + Math.max(0, primary.height - edge));
         return {x: Math.round(safeX), y: Math.round(safeY)};
     }
 
@@ -644,10 +635,7 @@ export class PinActor {
         }
 
         if (this.actor) {
-            const parent = this.actor.get_parent();
-            if (parent) {
-                parent.remove_child(this.actor);
-            }
+            this.actor.get_parent()?.remove_child(this.actor);
             this.actor.destroy();
             this.actor = null;
         }

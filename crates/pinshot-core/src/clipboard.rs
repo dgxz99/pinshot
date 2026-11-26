@@ -30,9 +30,9 @@ pub enum ClipboardContent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClipboardCandidate {
-    ImageMime(String),
+    ImageMime(&'static str),
     UriList,
-    TextMime(String),
+    TextMime(&'static str),
 }
 
 /// 读取当前 Wayland 剪贴板，按「图片 MIME > 本地图片 URI > 纯文本」优先级解析
@@ -45,7 +45,7 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
     for candidate in select_mime_candidates(&types) {
         match candidate {
             ClipboardCandidate::ImageMime(mime) => {
-                if let Some(raw) = paste_bytes(&mime)?
+                if let Some(raw) = paste_bytes(mime)?
                     && !raw.is_empty()
                 {
                     let source_scale = clipboard_png::source_scale(&raw);
@@ -77,7 +77,7 @@ pub fn read_clipboard() -> Result<ClipboardContent> {
                 }
             }
             ClipboardCandidate::TextMime(mime) => {
-                if let Some(raw) = paste_bytes(&mime)? {
+                if let Some(raw) = paste_bytes(mime)? {
                     let text = String::from_utf8_lossy(&raw).into_owned();
                     if !text.trim().is_empty() {
                         return Ok(ClipboardContent::Text(text));
@@ -207,7 +207,7 @@ fn select_mime_candidates(available: &[String]) -> Vec<ClipboardCandidate> {
 
     for img_mime in ["image/png", "image/jpeg", "image/webp", "image/bmp"] {
         if has(img_mime) {
-            result.push(ClipboardCandidate::ImageMime(img_mime.to_string()));
+            result.push(ClipboardCandidate::ImageMime(img_mime));
         }
     }
 
@@ -217,7 +217,7 @@ fn select_mime_candidates(available: &[String]) -> Vec<ClipboardCandidate> {
 
     for text_mime in ["text/plain;charset=utf-8", "text/plain"] {
         if has(text_mime) {
-            result.push(ClipboardCandidate::TextMime(text_mime.to_string()));
+            result.push(ClipboardCandidate::TextMime(text_mime));
         }
     }
 
@@ -269,11 +269,11 @@ mod tests {
         assert_eq!(
             order,
             vec![
-                ClipboardCandidate::ImageMime("image/png".to_string()),
-                ClipboardCandidate::ImageMime("image/jpeg".to_string()),
+                ClipboardCandidate::ImageMime("image/png"),
+                ClipboardCandidate::ImageMime("image/jpeg"),
                 ClipboardCandidate::UriList,
-                ClipboardCandidate::TextMime("text/plain;charset=utf-8".to_string()),
-                ClipboardCandidate::TextMime("text/plain".to_string()),
+                ClipboardCandidate::TextMime("text/plain;charset=utf-8"),
+                ClipboardCandidate::TextMime("text/plain"),
             ]
         );
     }

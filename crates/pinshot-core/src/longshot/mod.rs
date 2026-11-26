@@ -43,6 +43,16 @@ enum ScreenSelection {
     Choose,
 }
 
+impl ScreenSelection {
+    fn from_choose(choose_screen: bool) -> Self {
+        if choose_screen {
+            Self::Choose
+        } else {
+            Self::Remembered
+        }
+    }
+}
+
 /// 单屏采帧探测结果：视频像素尺寸与 Portal 提供的逻辑显示区域
 #[derive(Debug)]
 pub struct ProbeReport {

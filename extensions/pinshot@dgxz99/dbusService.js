@@ -6,10 +6,10 @@ import St from 'gi://St';
 import {LongshotController} from './longshot.js';
 import {PinshotScreenshot, nativeScreenshotActive} from './screenshot.js';
 
-export const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
-export const FRONTEND_OBJECT_PATH = '/io/github/dgxz99/Pinshot/Frontend';
-export const FRONTEND_INTERFACE_NAME = 'io.github.dgxz99.Pinshot.Frontend1';
-export const FRONTEND_ID = 'gnome-shell-51';
+const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
+const FRONTEND_OBJECT_PATH = '/io/github/dgxz99/Pinshot/Frontend';
+const FRONTEND_INTERFACE_NAME = 'io.github.dgxz99.Pinshot.Frontend1';
+const FRONTEND_ID = 'gnome-shell-51';
 
 Gio._promisify(Gio.InputStream.prototype, 'read_bytes_async');
 
@@ -43,10 +43,6 @@ const FRONTEND_IFACE_XML = `
     </method>
     <method name="ToggleHideAll">
       <arg type="b" direction="out" name="hidden"/>
-    </method>
-    <method name="SetSystemHidden">
-      <arg type="b" direction="in" name="hidden"/>
-      <arg type="b" direction="out" name="ok"/>
     </method>
     <method name="UnghostAll">
       <arg type="u" direction="out" name="count"/>
@@ -234,16 +230,20 @@ export class PinshotDbusService {
         return Boolean(this._pinManager.toggleHideAll());
     }
 
-    SetSystemHidden(hidden) {
-        return Boolean(this._pinManager.setSystemHidden(Boolean(hidden)));
-    }
-
     UnghostAll() {
         return Number(this._pinManager.unghostAll()) >>> 0;
     }
 
     ListActivePins() {
         return JSON.stringify(this._pinManager.listActivePins());
+    }
+
+    _takeUnixFd(invocation, handle, errorMessage) {
+        const fds = invocation.get_message().get_unix_fd_list();
+        if (!fds || handle < 0 || handle >= fds.get_length()) {
+            throw new Error(errorMessage);
+        }
+        return fds.get(handle);
     }
 
     async SetClipboardPngAsync([handle, length], invocation) {
@@ -253,11 +253,8 @@ export class PinshotDbusService {
             if (length < headerLength || length > MAX_CLIPBOARD_PNG_BYTES) {
                 throw new Error('剪贴板 PNG 长度超出范围');
             }
-            const fds = invocation.get_message().get_unix_fd_list();
-            if (!fds || handle < 0 || handle >= fds.get_length()) {
-                throw new Error('写入剪贴板缺少有效的输入文件描述符');
-            }
-            input = GioUnix.InputStream.new(fds.get(handle), true);
+            const fd = this._takeUnixFd(invocation, handle, '写入剪贴板缺少有效的输入文件描述符');
+            input = GioUnix.InputStream.new(fd, true);
             const bytes = await input.read_bytes_async(length, GLib.PRIORITY_DEFAULT, null);
             if (bytes.get_size() !== length || !GLib.Bytes.new_from_bytes(bytes, 0, headerLength).equal(PNG_SIGNATURE)) {
                 throw new Error('剪贴板 PNG 无效或未完整传输');
@@ -374,11 +371,8 @@ export class PinshotDbusService {
             if (this._longshot.active) {
                 throw new Error('请先完成或取消当前录制');
             }
-            const fds = invocation.get_message().get_unix_fd_list();
-            if (!fds || handle < 0 || handle >= fds.get_length()) {
-                throw new Error('截图请求缺少有效的输出文件描述符');
-            }
-            const stream = GioUnix.OutputStream.new(fds.get(handle), true);
+            const fd = this._takeUnixFd(invocation, handle, '截图请求缺少有效的输出文件描述符');
+            const stream = GioUnix.OutputStream.new(fd, true);
             let result;
             try {
                 result = await this._screenshot.capture(stream, invocation.get_sender(), invocation.get_connection(),

@@ -52,15 +52,62 @@ jobs:
           node --test tests/*.mjs
           bash -n scripts/*.sh
 
-      - name: Package release archive
+      - name: Resolve release version
+        id: meta
         run: |
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            ./scripts/package-release.sh "${{ github.ref_name }}" --check-version
+            VERSION="${{ github.ref_name }}"
           elif [[ -n "${{ inputs.version }}" ]]; then
-            ./scripts/package-release.sh "${{ inputs.version }}"
+            VERSION="${{ inputs.version }}"
           else
-            ./scripts/package-release.sh
+            CARGO_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version *= *"\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+            VERSION="v${CARGO_VERSION}"
           fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "pkgver=${VERSION#v}" >> "${GITHUB_OUTPUT}"
+
+      - name: Package tarball release archive
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            ./scripts/package-release.sh "${{ steps.meta.outputs.version }}" --check-version
+          else
+            ./scripts/package-release.sh "${{ steps.meta.outputs.version }}"
+          fi
+
+      - name: Package Arch Linux .pkg.tar.zst
+        run: |
+          ARCH_WORK="$(mktemp -d)"
+          trap 'rm -rf "${ARCH_WORK}"' EXIT
+          cp packaging/aur/pinshot-bin/PKGBUILD packaging/aur/pinshot-bin/pinshot-bin.install "${ARCH_WORK}/"
+          cp "dist/pinshot-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz" "${ARCH_WORK}/"
+          sed -i \
+            -e "s|^pkgver=.*|pkgver=${{ steps.meta.outputs.pkgver }}|" \
+            -e "s|^source_x86_64=.*|source_x86_64=(\"pinshot-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz\")|" \
+            "${ARCH_WORK}/PKGBUILD"
+          docker run --rm -v "${ARCH_WORK}:/work" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            archlinux:base-devel bash -euxo pipefail -c '
+              groupadd -o -g "${HOST_GID}" builder
+              useradd -m -o -u "${HOST_UID}" -g "${HOST_GID}" builder
+              su - builder -c "cd /work && makepkg --nodeps --skipchecksums --clean"
+            '
+          cp "${ARCH_WORK}"/pinshot-bin-*.pkg.tar.zst dist/
+          (
+            cd dist
+            sha256sum pinshot-*.tar.gz pinshot-bin-*.pkg.tar.zst > SHA256SUMS
+          )
+
+      - name: Render release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FALLBACK=""
+          if [[ ! -f "docs/releases/${{ steps.meta.outputs.version }}.md" && "${{ github.event_name }}" == "push" ]]; then
+            FALLBACK="dist/AUTO_NOTES.md"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${{ steps.meta.outputs.version }}" \
+              --jq .body > "${FALLBACK}" || true
+          fi
+          ./scripts/render-release-notes.sh "${{ steps.meta.outputs.version }}" dist dist/RELEASE_NOTES.md "${FALLBACK}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -68,7 +115,9 @@ jobs:
           name: pinshot-release-linux-x86_64
           path: |
             dist/pinshot-*.tar.gz
+            dist/pinshot-bin-*.pkg.tar.zst
             dist/SHA256SUMS
+            dist/RELEASE_NOTES.md
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -77,7 +126,8 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             dist/pinshot-*.tar.gz \
+            dist/pinshot-bin-*.pkg.tar.zst \
             dist/SHA256SUMS \
             --verify-tag \
             --title "Pinshot ${{ github.ref_name }}" \
-            --generate-notes
+            --notes-file dist/RELEASE_NOTES.md

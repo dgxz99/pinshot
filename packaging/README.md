@@ -18,17 +18,18 @@
 
 ## 2. 发布正式 GitHub Release
 
-1. 确认 [Cargo.toml](../Cargo.toml) 中 `[workspace.package].version` 已更新为目标版本（如 `0.1.0`），并推送到 `main` 等 CI 全部通过。
-2. 创建并推送对应 tag：
+1. 确认 [Cargo.toml](../Cargo.toml) 中 `[workspace.package].version` 已更新为目标版本（如 `0.1.1`）。
+2. 新建对应版本的发布说明 `docs/releases/v0.1.1.md`（参考 [docs/releases/v0.1.0.md](../docs/releases/v0.1.0.md)），并推送到 `main` 等 CI 全部通过。若未创建该文件，Release 流水线会自动回退使用 GitHub 自动生成的变更日志。
+3. 创建并推送对应 tag：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) 会自动校验版本号、运行测试、打包并发布 `Pinshot v0.1.0` Release（附带 `.tar.gz` 与 `SHA256SUMS`）。
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) 会自动校验版本号、运行测试、打包出通用 `.tar.gz` 与 Arch `.pkg.tar.zst`，在发布正文底部自动附加折叠的 SHA-256 校验块，并发布 `Pinshot v0.1.1` Release（附带 `.tar.gz`、`.pkg.tar.zst` 与 `SHA256SUMS`）。
 
-> 已发布的 tag 和压缩包请勿覆盖重打，以免破坏 AUR 用户的本地缓存校验；如有修复请递增补丁版本号（如 `v0.1.1`）。
+> 已发布的 tag 和压缩包请勿覆盖重打，以免破坏 AUR 用户的本地缓存校验；如有修复请递增补丁版本号（如 `v0.1.2`）。
 
 ## 3. 发布与更新 AUR（`pinshot` / `pinshot-bin`）
 

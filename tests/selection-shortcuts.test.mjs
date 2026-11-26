@@ -9,9 +9,10 @@ test('both toolbars share ordered actions and package their SVGs with the extens
     assert.deepEqual(actionIds, ['edit', 'pin', 'save', 'cancel', 'copy']);
     assert.deepEqual(SELECTION_ACTIONS.map(({id}) => id), ['edit', 'pin', 'copy']);
     const icons = new URL('../extensions/pinshot@dgxz99/icons/', import.meta.url);
-    for (const id of ['scrollshot', 'scrollshot-vertical', 'scrollshot-horizontal', 'start', ...actionIds]) {
+    for (const id of ['scrollshot', 'scrollshot-vertical', 'scrollshot-horizontal', 'start', 'pinshot', ...actionIds]) {
         assert.match(readFileSync(new URL(`${id}-symbolic.svg`, icons), 'utf8'), /<svg[^>]+viewBox=/);
     }
+    assert.match(readFileSync(new URL('pinshot.svg', icons), 'utf8'), /<svg[^>]+viewBox=/);
 });
 
 test('understands defaults and Ctrl+T with GTK modifier aliases', () => {

@@ -103,6 +103,10 @@ if command -v gnome-extensions >/dev/null 2>&1; then
     fi
 fi
 
+if [[ -d "/usr/share/gnome-shell/extensions/${EXT_UUID}" ]]; then
+    echo "[pinshot] 提示: 检测到系统级扩展 /usr/share/gnome-shell/extensions/${EXT_UUID}，用户级安装会优先覆盖它"
+fi
+
 if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
     echo "[pinshot] 提示: 请将 ${BIN_DIR} 加入 PATH 环境变量"
 fi

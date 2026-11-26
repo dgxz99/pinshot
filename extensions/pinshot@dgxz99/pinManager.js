@@ -126,10 +126,31 @@ export class PinManager {
         return true;
     }
 
+    get userHidden() {
+        return this._userHidden;
+    }
+
     toggleHideAll() {
         this._userHidden = !this._userHidden;
         this._syncContainerVisibility();
         return this._userHidden;
+    }
+
+    focusPin(id) {
+        const pin = this._pins.get(id);
+        if (!pin) {
+            return false;
+        }
+        if (this._userHidden) {
+            this._userHidden = false;
+            this._syncContainerVisibility();
+        }
+        if (pin.ghost) {
+            pin.setGhost(false);
+        }
+        this._raisePin(pin);
+        this._selectPin(pin);
+        return true;
     }
 
     setSystemHidden(hidden) {

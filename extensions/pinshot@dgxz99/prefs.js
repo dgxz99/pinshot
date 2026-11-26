@@ -107,6 +107,56 @@ export default class PinshotPreferences extends ExtensionPreferences {
         page.add(this._createPinControls());
         window.add(page);
         window.add(this._createScreenshotPage(settings));
+        window.add(this._createAppearancePage(window, settings));
+    }
+
+    _createAppearancePage(window, settings) {
+        const page = new Adw.PreferencesPage({
+            title: '界面',
+            icon_name: 'preferences-desktop-appearance-symbolic',
+        });
+        const group = new Adw.PreferencesGroup({
+            title: '顶栏图标',
+            description: '在 GNOME 顶栏显示快捷操作菜单，可随时打开截图、管理贴图或进入首选项。',
+        });
+
+        const showIndicator = new Adw.SwitchRow({
+            title: '在顶栏显示图标',
+            subtitle: '关闭后仍可通过全局快捷键、CLI 或应用菜单使用全部功能。',
+        });
+        settings.bind('show-panel-indicator', showIndicator, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(showIndicator);
+
+        const iconStyles = [
+            {value: 'color', label: '彩色图标'},
+            {value: 'symbolic', label: '单色图标（跟随系统主题）'},
+        ];
+        const styleRow = new Adw.ComboRow({
+            title: '顶栏图标样式',
+            model: Gtk.StringList.new(iconStyles.map(item => item.label)),
+        });
+        const syncStyle = () => {
+            const current = settings.get_string('panel-icon-style');
+            const idx = iconStyles.findIndex(item => item.value === current);
+            styleRow.set_selected(idx >= 0 ? idx : 0);
+        };
+        syncStyle();
+        styleRow.connect('notify::selected', () => {
+            const selected = iconStyles[styleRow.get_selected()];
+            if (selected && settings.get_string('panel-icon-style') !== selected.value) {
+                settings.set_string('panel-icon-style', selected.value);
+            }
+        });
+        const styleChangedId = settings.connect('changed::panel-icon-style', syncStyle);
+        window.connect('close-request', () => {
+            settings.disconnect(styleChangedId);
+            return false;
+        });
+        settings.bind('show-panel-indicator', styleRow, 'sensitive', Gio.SettingsBindFlags.GET);
+        group.add(styleRow);
+
+        page.add(group);
+        return page;
     }
 
     _createScreenshotPage(settings) {

@@ -1,0 +1,34 @@
+[Desktop Entry]
+Type=Application
+Name=Pinshot
+GenericName=Screenshot & Pin Tool
+GenericName[zh_CN]=截图与贴图工具
+Comment=Configure Pinshot shortcuts and screenshot settings
+Comment[zh_CN]=配置 Pinshot 快捷键与截图选项
+Icon=io.github.dgxz99.pinshot
+Exec=gnome-extensions prefs pinshot@dgxz99
+Terminal=false
+Categories=Utility;GTK;
+Keywords=screenshot;pin;gif;longshot;wayland;截图;贴图;长截图;
+StartupNotify=true
+Actions=capture;pin-clipboard;longshot;gif;
+
+[Desktop Action capture]
+Name=Capture Region
+Name[zh_CN]=区域截图
+Exec=pinshot capture
+
+[Desktop Action pin-clipboard]
+Name=Pin Clipboard
+Name[zh_CN]=剪贴板贴图
+Exec=pinshot pin-clipboard
+
+[Desktop Action longshot]
+Name=Scrolling Capture
+Name[zh_CN]=滚动长截图
+Exec=pinshot longshot
+
+[Desktop Action gif]
+Name=Record GIF
+Name[zh_CN]=录制 GIF
+Exec=pinshot gif

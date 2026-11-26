@@ -2,8 +2,13 @@
 set -euo pipefail
 
 EXT_UUID="pinshot@dgxz99"
+APP_ID="io.github.dgxz99.pinshot"
 BIN_PATH="${HOME}/.local/bin/pinshot"
-EXT_DEST_DIR="${HOME}/.local/share/gnome-shell/extensions/${EXT_UUID}"
+DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}"
+EXT_DEST_DIR="${DATA_DIR}/gnome-shell/extensions/${EXT_UUID}"
+APPS_DIR="${DATA_DIR}/applications"
+DESKTOP_DEST="${APPS_DIR}/${APP_ID}.desktop"
+ICON_DEST="${DATA_DIR}/icons/hicolor/scalable/apps/${APP_ID}.svg"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/pinshot"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/pinshot"
 
@@ -42,6 +47,22 @@ fi
 if [[ -e "${EXT_DEST_DIR}" || -L "${EXT_DEST_DIR}" ]]; then
     rm -rf "${EXT_DEST_DIR}"
     echo "[pinshot] 已移除扩展: ${EXT_DEST_DIR}"
+fi
+
+if [[ -e "${DESKTOP_DEST}" || -L "${DESKTOP_DEST}" ]]; then
+    rm -f "${DESKTOP_DEST}"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "${APPS_DIR}" >/dev/null 2>&1 || true
+    fi
+    echo "[pinshot] 已移除应用入口: ${DESKTOP_DEST}"
+fi
+
+if [[ -e "${ICON_DEST}" || -L "${ICON_DEST}" ]]; then
+    rm -f "${ICON_DEST}"
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t "${DATA_DIR}/icons/hicolor" >/dev/null 2>&1 || true
+    fi
+    echo "[pinshot] 已移除应用图标: ${ICON_DEST}"
 fi
 
 if [[ "$PURGE" == true ]]; then

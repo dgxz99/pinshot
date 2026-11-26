@@ -193,7 +193,14 @@ fn cmd_capture(default_action: ScreenshotAction) -> Result<()> {
             anyhow::bail!("此版本未启用滚动长截图或 GIF 录制")
         }
     };
-    deliver_capture(&frontend, captured, PinKind::Screenshot)
+    let action = captured.action;
+    let result = deliver_capture(&frontend, captured, PinKind::Screenshot);
+    if action == ScreenshotAction::Edit
+        && let Err(error) = &result
+    {
+        notify::warn("Pinshot 标注失败", &format!("{error:#}"));
+    }
+    result
 }
 
 fn deliver_capture(
@@ -640,7 +647,9 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 .with_context(|| format!("读取原图失败: {}", record.image_path.display()))?;
             save_screenshot(&FrontendClient::connect()?, &cfg, image)
         }
-        InternalCommands::EditSatty { id } => edit_existing_pin(&id),
+        InternalCommands::EditSatty { id } => edit_existing_pin(&id).inspect_err(|error| {
+            notify::warn("Pinshot 标注失败", &format!("{error:#}"));
+        }),
         InternalCommands::MarkClosed { id } => {
             let store = PinStore::open_default()?;
             store.mark_closed(&id)?;

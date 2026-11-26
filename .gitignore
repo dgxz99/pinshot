@@ -14,5 +14,6 @@
 /extensions/*/schemas/gschemas.compiled
 
 # 临时调试与打包产物
+/dist/
 *.zip
 *.log

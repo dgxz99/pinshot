@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build, lint & test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            libglib2.0-bin \
+            desktop-file-utils \
+            pango1.0-tools \
+            fonts-dejavu-core
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check Rust formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        run: |
+          cargo test --locked
+          cargo test --locked --all-features
+
+      - name: Run extension tests & syntax checks
+        run: |
+          node --test tests/*.mjs
+          node --experimental-vm-modules -e "
+            import fs from 'node:fs';
+            import vm from 'node:vm';
+            for (const f of fs.readdirSync('extensions/pinshot@dgxz99').filter(x => x.endsWith('.js'))) {
+              new vm.SourceTextModule(fs.readFileSync('extensions/pinshot@dgxz99/' + f, 'utf8'), {identifier: f});
+            }
+          "
+
+      - name: Validate GSettings schema, desktop entry & scripts
+        run: |
+          glib-compile-schemas --strict extensions/pinshot@dgxz99/schemas
+          desktop-file-validate data/io.github.dgxz99.pinshot.desktop
+          bash -n scripts/*.sh

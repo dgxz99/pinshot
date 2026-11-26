@@ -75,7 +75,7 @@ export class PinActor {
 
         this._contextMenu = new PinContextMenu(this, callbacks.onRequestClose);
 
-        this._initGeometry();
+        this._initGeometry(payload);
         this._loadFullTexture();
         this._applyOpacity(this._opacity);
         this._actorSignalIds = [
@@ -100,9 +100,21 @@ export class PinActor {
     }
 
     /**
-     * 计算初始缩放与弹出位置：单边超过当前显示器工作区 75% 时自动等比收敛，并围绕指针居中
+     * 计算初始缩放与弹出位置：
+     * - 区域截图带原始选区坐标时，按 1:1 尺寸原位贴出；
+     * - 其他来源（剪贴板、长图、历史恢复）超工作区 75% 时等比收敛并围绕指针居中。
      */
-    _initGeometry() {
+    _initGeometry(payload) {
+        if (Number.isFinite(payload.initial_x) && Number.isFinite(payload.initial_y)) {
+            this._zoomMin = this._config.min_scale;
+            this._scale = 1.0;
+            const [w, h] = this._scaledSize();
+            const clamped = this._clampPositionToMonitors(payload.initial_x, payload.initial_y, w, h);
+            this.actor.set_size(w, h);
+            this.actor.set_position(clamped.x, clamped.y);
+            return;
+        }
+
         const [ptrX, ptrY] = global.get_pointer();
         const monitorIndex = this._findMonitorIndexAt(ptrX, ptrY);
         const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);

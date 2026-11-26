@@ -95,7 +95,7 @@ export class PinshotScreenshot {
                 return [0, action, rect];
             }
             await this._writeSelection(content.get_texture(), scale, rect, stream, session.cancellable);
-            return session.cancellable.is_cancelled() ? CANCELLED : [scale, action, CANCELLED_REGION];
+            return session.cancellable.is_cancelled() ? CANCELLED : [scale, action, rect];
         } catch (error) {
             if (session.cancellable.is_cancelled()) {
                 return CANCELLED;

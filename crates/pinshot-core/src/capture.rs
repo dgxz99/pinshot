@@ -68,6 +68,8 @@ pub struct CapturedImage {
     pub action: ScreenshotAction,
     pub png_bytes: Vec<u8>,
     pub source_scale: f64,
+    /// 原始选区左上角逻辑坐标，贴图时用于原位显示
+    pub initial_position: Option<(i32, i32)>,
 }
 
 /// 扩展首选项中的 Pinshot 截图输出策略
@@ -222,10 +224,12 @@ pub fn capture_interactive_region(
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
     file.read_to_end(&mut png_bytes)
         .map_err(|err| PinshotError::io(&temp_dir, err))?;
+    let initial_position = (region.2 > 0 && region.3 > 0).then_some((region.0, region.1));
     Ok(Some(ScreenshotSelection::Image(CapturedImage {
         action,
         png_bytes,
         source_scale,
+        initial_position,
     })))
 }
 

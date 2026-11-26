@@ -69,6 +69,8 @@ impl PinRecord {
             kind: self.kind,
             has_text: self.text_path.is_some(),
             title_preview: self.title_preview.clone(),
+            initial_x: None,
+            initial_y: None,
         }
     }
 }

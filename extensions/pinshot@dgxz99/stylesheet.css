@@ -117,12 +117,11 @@
     font-size: 12px;
 }
 
-.pinshot-panel-pin-close {
-    padding: 2px 4px;
-    border-radius: 4px;
-    margin-left: 8px;
+.panel-button.pinshot-panel-button {
+    -natural-hpadding: 6px;
+    -minimum-hpadding: 4px;
 }
 
-.pinshot-panel-pin-close:hover {
-    background-color: rgba(255, 255, 255, 0.16);
+.panel-button.pinshot-panel-button .system-status-icon {
+    padding: 0;
 }

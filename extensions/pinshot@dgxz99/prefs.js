@@ -162,8 +162,8 @@ export default class PinshotPreferences extends ExtensionPreferences {
     _createScreenshotPage(settings) {
         const page = new Adw.PreferencesPage({title: '截图', icon_name: 'camera-photo-symbolic'});
         const group = new Adw.PreferencesGroup({
-            title: 'Pinshot 截图输出',
-            description: '只影响 Pinshot，不改变 GNOME 自带截图。目录和文件名也用于右键「保存原图」，不影响贴图历史。',
+            title: '截图输出',
+            description: '目录和文件名也用于右键「保存原图」，不影响贴图历史。',
         });
         const autoSave = new Adw.SwitchRow({
             title: '自动保存到目录',
@@ -174,7 +174,7 @@ export default class PinshotPreferences extends ExtensionPreferences {
 
         const notify = new Adw.SwitchRow({
             title: '显示截图完成通知',
-            subtitle: '只控制截图流程的成功通知，不影响 GNOME 自带截图。',
+            subtitle: '截图贴图或标注完成后弹出桌面通知。',
         });
         settings.bind('screenshot-notify', notify, 'active', Gio.SettingsBindFlags.DEFAULT);
         group.add(notify);

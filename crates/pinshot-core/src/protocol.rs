@@ -30,6 +30,11 @@ pub struct PinPayload {
     pub kind: PinKind,
     pub has_text: bool,
     pub title_preview: String,
+    /// 可选初始贴图左上角逻辑坐标（区域截图原位贴出时使用）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_y: Option<i32>,
 }
 
 /// `ListActivePins` 返回的单条活跃贴图状态
@@ -66,12 +71,27 @@ mod tests {
             kind: PinKind::ClipboardText,
             has_text: true,
             title_preview: "fn main()".to_string(),
+            initial_x: None,
+            initial_y: None,
         };
 
         let json = serde_json::to_string(&payload).expect("序列化应成功");
         assert!(json.contains("\"kind\":\"clipboard_text\""));
+        assert!(!json.contains("initial_x"));
 
         let decoded: PinPayload = serde_json::from_str(&json).expect("反序列化应成功");
         assert_eq!(decoded, payload);
+
+        let positioned = PinPayload {
+            initial_x: Some(120),
+            initial_y: Some(240),
+            ..payload
+        };
+        let pos_json = serde_json::to_string(&positioned).expect("带坐标序列化应成功");
+        assert!(pos_json.contains("\"initial_x\":120"));
+        assert_eq!(
+            serde_json::from_str::<PinPayload>(&pos_json).expect("反序列化应成功"),
+            positioned
+        );
     }
 }

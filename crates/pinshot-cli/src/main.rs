@@ -245,7 +245,12 @@ fn pin_screenshot(frontend: &FrontendClient, captured: CapturedImage, kind: PinK
         &cfg.cache,
     )?;
 
-    push_pin_to_frontend(&store, &record)?;
+    let mut payload = record.to_payload();
+    if let Some((x, y)) = captured.initial_position {
+        payload.initial_x = Some(x);
+        payload.initial_y = Some(y);
+    }
+    push_pin_to_frontend(&store, &record.id, &payload)?;
     if let Err(error) =
         clipboard::copy_png_bytes(frontend, &captured.png_bytes, captured.source_scale)
     {
@@ -338,6 +343,7 @@ fn longshot(
         action,
         png_bytes: recording.png_bytes()?,
         source_scale: recording.source_scale,
+        initial_position: None,
     };
     drop(recording);
     deliver_capture(&frontend, captured, PinKind::Longshot)
@@ -446,14 +452,18 @@ fn cmd_pin_clipboard() -> Result<()> {
         }
     };
 
-    push_pin_to_frontend(&store, &record)?;
+    push_pin_to_frontend(&store, &record.id, &record.to_payload())?;
     Ok(())
 }
 
 /// 将已入库记录推送到前端展示；若推送失败则降级为历史条目防丢失并提示用户
-fn push_pin_to_frontend(store: &PinStore, record: &pinshot_core::store::PinRecord) -> Result<()> {
+fn push_pin_to_frontend(
+    store: &PinStore,
+    record_id: &str,
+    payload: &pinshot_core::protocol::PinPayload,
+) -> Result<()> {
     let result = FrontendClient::connect().and_then(|client| {
-        let ok = client.create_pin(&record.to_payload())?;
+        let ok = client.create_pin(payload)?;
         if !ok {
             return Err(pinshot_core::PinshotError::Dbus(
                 "前端拒绝创建贴图".to_string(),
@@ -463,7 +473,7 @@ fn push_pin_to_frontend(store: &PinStore, record: &pinshot_core::store::PinRecor
     });
 
     if let Err(err) = result {
-        let _ = store.mark_closed(&record.id);
+        let _ = store.mark_closed(record_id);
         notify::warn("pinshot 贴图失败", &err.to_string());
         return Err(err.into());
     }

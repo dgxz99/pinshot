@@ -1,10 +1,10 @@
 {
     "uuid": "pinshot@dgxz99",
     "name": "Pinshot",
-    "description": "轻量级 Wayland 截图与非窗口贴图前端（GNOME Shell 51）",
+    "description": "轻量级 Wayland 截图与非窗口贴图前端（GNOME Shell 50 / 51）",
     "author": "dgxz99",
     "version": 1,
-    "shell-version": ["51"],
+    "shell-version": ["50", "51"],
     "settings-schema": "io.github.dgxz99.pinshot",
     "url": "https://github.com/dgxz99/pinshot"
 }

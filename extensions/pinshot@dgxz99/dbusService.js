@@ -2,6 +2,7 @@ import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import {LongshotController} from './longshot.js';
 import {PinshotScreenshot, nativeScreenshotActive} from './screenshot.js';
@@ -9,7 +10,8 @@ import {PinshotScreenshot, nativeScreenshotActive} from './screenshot.js';
 const FRONTEND_BUS_NAME = 'io.github.dgxz99.Pinshot.Frontend';
 const FRONTEND_OBJECT_PATH = '/io/github/dgxz99/Pinshot/Frontend';
 const FRONTEND_INTERFACE_NAME = 'io.github.dgxz99.Pinshot.Frontend1';
-const FRONTEND_ID = 'gnome-shell-51';
+const SHELL_MAJOR = Config.PACKAGE_VERSION.split('.')[0] || 'unknown';
+const FRONTEND_ID = `gnome-shell-${SHELL_MAJOR}`;
 
 Gio._promisify(Gio.InputStream.prototype, 'read_bytes_async');
 

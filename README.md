@@ -4,7 +4,7 @@
   <p><strong>Take screenshots, pin references, and record GIFs on GNOME Wayland.</strong></p>
   <p><strong>English</strong> · <a href="README.zh-CN.md">Simplified Chinese</a></p>
   <p>
-    <a href="#installation"><img src="https://img.shields.io/badge/GNOME%20Shell-51-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 51" /></a>
+    <a href="#installation"><img src="https://img.shields.io/badge/GNOME%20Shell-50%20%7C%2051-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 50 / 51" /></a>
     <a href="#installation"><img src="https://img.shields.io/badge/Wayland-F29B26?style=flat-square&amp;logo=wayland&amp;logoColor=white" alt="Wayland" /></a>
     <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-B7410E?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2C8A5B?style=flat-square&amp;logo=opensourceinitiative&amp;logoColor=white" alt="MIT License" /></a>
@@ -14,7 +14,7 @@
 
 Pin a screenshot, an image, or a copied snippet next to your work so you can refer to it without switching windows. Pins stay above ordinary windows and follow you across workspaces. They’re drawn by GNOME Shell, so they don’t show up in `Alt+Tab`.
 
-**Supported desktop:** GNOME Shell 51 on Wayland. Tested on Arch Linux with GNOME Shell 51.1.
+**Supported desktop:** GNOME Shell 50 / 51 on Wayland. Tested on Arch Linux (GNOME Shell 51) and Ubuntu 26.04 (GNOME Shell 50).
 
 ![Pinshot’s adjustable capture area and action toolbar on GNOME Wayland](docs/images/region-capture.png)
 
@@ -45,7 +45,8 @@ yay -S pinshot       # Build from source
 curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash
 ```
 
-Installs `~/.local/bin/pinshot`, the GNOME Shell extension, and the desktop launcher from the latest GitHub Release. Pass `--version v0.1.0` to install a specific release. Make sure the runtime dependencies below are installed.
+- Specific version: `curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash -s -- --version v0.1.0`
+- Prompts to install missing runtime dependencies via `sudo`
 
 ### Build from source
 
@@ -68,21 +69,21 @@ For development, `--symlink` links the extension directory to the checkout; `--s
 
 | Dependency | Used for |
 | --- | --- |
-| GNOME Shell 51, `gnome-extensions` | Running and managing the extension |
+| GNOME Shell 50 / 51, `gnome-extensions` | Running and managing the extension |
 | `wl-clipboard`, `pango-view` (Pango) | Clipboard access and text cards |
 | GNOME ScreenCast Portal, PipeWire, GStreamer (`pipewiresrc`, `videorate`, `videoconvert`) | Scrolling capture and GIF recording |
 | `satty`, `notify-send` (`libnotify`) | Optional: annotation and desktop notifications |
 
 ### Enable the extension
 
-On GNOME Wayland, **log out and back in** after the first install or after updating the extension, then enable it and verify the connection:
+On GNOME Wayland, **log out and back in** after installing or updating the extension. The install script pre-enables it automatically; for AUR installs, enable it once after logging back in, then verify:
 
 ```bash
 gnome-extensions enable pinshot@dgxz99
 pinshot ping
 ```
 
-A response of `gnome-shell-51` means the extension is online. If you used the install script and `~/.local/bin` is not in `PATH`, add it or use `~/.local/bin/pinshot`.
+A response like `gnome-shell-50` or `gnome-shell-51` means the extension is online. If you used the install script and `~/.local/bin` is not in `PATH`, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile or run `~/.local/bin/pinshot`.
 
 ## Quick start
 
@@ -210,10 +211,25 @@ Text-card and cache settings apply to new items immediately. The extension reads
 
 ## Troubleshooting and uninstalling
 
-- **The extension is offline:** Verify you’re in a GNOME Shell 51 Wayland session and check `gnome-extensions info pinshot@dgxz99`. If GNOME is still running older extension code, log out and back in.
+- **The extension is offline:** Verify you’re in a GNOME Shell 50 / 51 Wayland session and check `gnome-extensions info pinshot@dgxz99`. If GNOME is still running older extension code, log out and back in.
 - **A shortcut does nothing:** Try the corresponding CLI command first, then check whether global shortcuts are paused in the top-bar menu or conflict with a system shortcut.
 - **Need logs?** Run `journalctl --user -b -o cat | grep -i pinshot`. When [reporting an issue](https://github.com/dgxz99/pinshot/issues), include your GNOME Shell version, whether the session is Wayland, and steps to reproduce it.
-- **Uninstall:** `sudo pacman -Rns pinshot-bin` (or `pinshot`) for AUR installs, or `./scripts/uninstall.sh` for script installs (pass `--purge` to also remove configuration and cache; exported files are kept).
+
+### Uninstall
+
+- **Script install** (removes CLI, extension, and launcher; add `--purge` for a full uninstall including config, cache, and GSettings):
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash
+  # Full uninstall (keeps exported PNG/GIF files):
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash -s -- --purge
+  ```
+  If you cloned the repository, you can run `./scripts/uninstall.sh` or `./scripts/uninstall.sh --purge` directly.
+- **AUR install:**
+  ```bash
+  sudo pacman -Rns pinshot-bin   # or pinshot
+  # Optional: remove user config, cache, and GSettings
+  rm -rf ~/.config/pinshot ~/.cache/pinshot && dconf reset -f /io/github/dgxz99/pinshot/
+  ```
 
 ## License
 

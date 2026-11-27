@@ -11,7 +11,7 @@ import {PinManager} from './pinManager.js';
 import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 
 /**
- * Pinshot GNOME Shell 51 扩展入口
+ * Pinshot GNOME Shell 扩展入口
  */
 export default class PinshotExtension extends Extension {
     enable() {

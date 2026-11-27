@@ -4,7 +4,7 @@
   <p><strong>在 GNOME Wayland 上截图、贴图和录制 GIF。</strong></p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
   <p>
-    <a href="#安装"><img src="https://img.shields.io/badge/GNOME%20Shell-51-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 51" /></a>
+    <a href="#安装"><img src="https://img.shields.io/badge/GNOME%20Shell-50%20%7C%2051-4A86CF?style=flat-square&amp;logo=gnome&amp;logoColor=white" alt="GNOME Shell 50 / 51" /></a>
     <a href="#安装"><img src="https://img.shields.io/badge/Wayland-F29B26?style=flat-square&amp;logo=wayland&amp;logoColor=white" alt="Wayland" /></a>
     <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-B7410E?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2C8A5B?style=flat-square&amp;logo=opensourceinitiative&amp;logoColor=white" alt="MIT 许可证" /></a>
@@ -14,7 +14,7 @@
 
 把截图、图片或刚复制的代码贴在桌面上，对照参考资料时不用来回切窗口。贴图默认在普通窗口上方，切换工作区后仍可见。它由 GNOME Shell 直接绘制，不会出现在 `Alt+Tab` 列表里。
 
-**支持环境：** GNOME Shell 51（Wayland）。已在 Arch Linux / GNOME Shell 51.1 上验证。
+**支持环境：** GNOME Shell 50 / 51（Wayland）。已在 Arch Linux（GNOME Shell 51）与 Ubuntu 26.04（GNOME Shell 50）上验证。
 
 ![GNOME Wayland 中 Pinshot 的可调截图选区和操作工具条](docs/images/region-capture.png)
 
@@ -45,7 +45,8 @@ yay -S pinshot       # 从源码构建
 curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash
 ```
 
-自动从最新 GitHub Release 安装 `~/.local/bin/pinshot`、GNOME Shell 扩展与应用入口。可加 `--version v0.1.0` 指定版本，运行前请确保已安装下方的运行依赖。
+- 指定版本：`curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash -s -- --version v0.1.0`
+- 缺少运行依赖时会提示通过 `sudo` 自动安装
 
 ### 从源码构建
 
@@ -68,21 +69,21 @@ cd pinshot
 
 | 依赖 | 用途 |
 | --- | --- |
-| GNOME Shell 51、`gnome-extensions` | 运行和管理扩展 |
+| GNOME Shell 50 / 51、`gnome-extensions` | 运行和管理扩展 |
 | `wl-clipboard`、`pango-view`（Pango） | 读取剪贴板和生成文字卡片 |
 | GNOME ScreenCast Portal、PipeWire、GStreamer（`pipewiresrc`、`videorate`、`videoconvert`） | 长截图和 GIF 录制 |
 | `satty`、`notify-send`（`libnotify`） | 可选：标注和桌面通知 |
 
 ### 启用扩展
 
-首次安装或更新扩展后，**注销并重新登录 GNOME**，再启用扩展并检查连接：
+首次安装或更新扩展后，**注销并重新登录 GNOME**。脚本安装会自动将扩展加入自启列表；AUR 安装在重登录后执行一次启用即可：
 
 ```bash
 gnome-extensions enable pinshot@dgxz99
 pinshot ping
 ```
 
-返回 `gnome-shell-51` 表示扩展已在线。使用脚本安装时，如 `~/.local/bin` 尚未加入 `PATH`，可直接运行 `~/.local/bin/pinshot` 或将其加入 `PATH`。
+返回 `gnome-shell-50` 或 `gnome-shell-51` 表示扩展已在线。脚本安装若当前终端 `PATH` 未包含 `~/.local/bin`，可在 `~/.bashrc` 中加入 `export PATH="$HOME/.local/bin:$PATH"` 或直接运行 `~/.local/bin/pinshot`。
 
 ## 快速上手
 
@@ -210,10 +211,25 @@ padding_px = 16
 
 ## 排查与卸载
 
-- **扩展离线**：确认当前是 GNOME Shell 51 的 Wayland 会话，用 `gnome-extensions info pinshot@dgxz99` 查看状态。若 GNOME 仍在用旧版扩展代码，注销并重新登录。
+- **扩展离线**：确认当前是 GNOME Shell 50 / 51 的 Wayland 会话，用 `gnome-extensions info pinshot@dgxz99` 查看状态。若 GNOME 仍在用旧版扩展代码，注销并重新登录。
 - **快捷键没反应**：先试对应的 CLI 命令，再检查顶栏菜单是否开启了「禁用全局快捷键」，或键位是否与系统快捷键冲突。
 - **查看日志**：运行 `journalctl --user -b -o cat | grep -i pinshot`。[反馈问题](https://github.com/dgxz99/pinshot/issues)时请附上 GNOME Shell 版本、是否为 Wayland 会话和复现步骤。
-- **卸载**：AUR 安装执行 `sudo pacman -Rns pinshot-bin`（或 `pinshot`）；脚本安装执行 `./scripts/uninstall.sh`（加 `--purge` 一并清理配置与缓存；已导出文件保留）。
+
+### 卸载
+
+- **脚本安装**（移除 CLI、扩展与应用入口；加 `--purge` 完全卸载并清理配置、缓存与 GSettings 设置）：
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash
+  # 完全卸载（已导出的 PNG/GIF 保留）：
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash -s -- --purge
+  ```
+  如已克隆仓库，可直接运行 `./scripts/uninstall.sh` 或 `./scripts/uninstall.sh --purge`。
+- **AUR 安装**：
+  ```bash
+  sudo pacman -Rns pinshot-bin   # 或 pinshot
+  # 可选：完全清理用户配置、缓存与 GSettings
+  rm -rf ~/.config/pinshot ~/.cache/pinshot && dconf reset -f /io/github/dgxz99/pinshot/
+  ```
 
 ## 开源协议
 

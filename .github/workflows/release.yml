@@ -7,9 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Dry-run release version (e.g. v0.1.0, does not publish a GitHub Release)'
+        description: 'Release version (e.g. v0.1.1; dry-run does not overwrite GitHub Release)'
         required: false
         default: ''
+      publish_aur:
+        description: 'Also publish this version to AUR (requires AUR_SSH_PRIVATE_KEY secret)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -18,6 +23,9 @@ jobs:
   release:
     name: Build & package Linux x86_64
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      pkgver: ${{ steps.meta.outputs.pkgver }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -131,3 +139,91 @@ jobs:
             --verify-tag \
             --title "Pinshot ${{ github.ref_name }}" \
             --notes-file dist/RELEASE_NOTES.md
+
+  publish-aur:
+    name: Publish AUR (pinshot & pinshot-bin)
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_aur)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish pinshot and pinshot-bin to AUR
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          PKGVER: ${{ needs.release.outputs.pkgver }}
+          REPO: ${{ github.repository }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${AUR_SSH_PRIVATE_KEY}" ]]; then
+            echo "AUR_SSH_PRIVATE_KEY secret is not configured; skipping AUR publish."
+            exit 0
+          fi
+
+          WORK_DIR="$(mktemp -d)"
+          SSH_DIR="${WORK_DIR}/ssh"
+          mkdir -p "${SSH_DIR}"
+          chmod 700 "${SSH_DIR}"
+          trap 'rm -rf "${WORK_DIR}"' EXIT
+
+          KEY_FILE="${SSH_DIR}/aur_key"
+          KNOWN_HOSTS="${SSH_DIR}/known_hosts"
+          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > "${KEY_FILE}"
+          chmod 600 "${KEY_FILE}"
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org > "${KNOWN_HOSTS}" 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes"
+
+          GIT_NAME="${AUR_USERNAME:-daguo}"
+          GIT_EMAIL="${AUR_EMAIL:-dgxz99@users.noreply.github.com}"
+
+          SRC_URL="https://github.com/${REPO}/archive/refs/tags/${VERSION}.tar.gz"
+          BIN_URL="https://github.com/${REPO}/releases/download/${VERSION}/pinshot-${VERSION}-linux-x86_64.tar.gz"
+
+          curl -fsSL --retry 5 --retry-delay 5 "${SRC_URL}" -o "${WORK_DIR}/src.tar.gz"
+          curl -fsSL --retry 5 --retry-delay 5 "${BIN_URL}" -o "${WORK_DIR}/bin.tar.gz"
+          SRC_SHA="$(sha256sum "${WORK_DIR}/src.tar.gz" | awk '{print $1}')"
+          BIN_SHA="$(sha256sum "${WORK_DIR}/bin.tar.gz" | awk '{print $1}')"
+
+          publish_pkg() {
+            local pkg="$1" sha_key="$2" sha_val="$3"
+            local aur_dir="${WORK_DIR}/aur-${pkg}"
+
+            git clone "ssh://aur@aur.archlinux.org/${pkg}.git" "${aur_dir}"
+            cp "packaging/aur/${pkg}/PKGBUILD" "packaging/aur/${pkg}/${pkg}.install" "${aur_dir}/"
+
+            sed -i \
+              -e '/updpkgsums/d' \
+              -e "s|^pkgver=.*|pkgver=${PKGVER}|" \
+              -e "s|^pkgrel=.*|pkgrel=1|" \
+              -e "s|^${sha_key}=.*|${sha_key}=('${sha_val}')|" \
+              "${aur_dir}/PKGBUILD"
+
+            docker run --rm -v "${aur_dir}:/work" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+              archlinux:base-devel bash -euo pipefail -c '
+                groupadd -o -g "${HOST_GID}" builder
+                useradd -m -o -u "${HOST_UID}" -g "${HOST_GID}" builder
+                su - builder -c "cd /work && makepkg --printsrcinfo > .SRCINFO"
+              '
+
+            (
+              cd "${aur_dir}"
+              git config user.name "${GIT_NAME}"
+              git config user.email "${GIT_EMAIL}"
+              git add PKGBUILD "${pkg}.install" .SRCINFO
+              if git diff --cached --quiet; then
+                echo "No changes to publish for ${pkg} (${VERSION})."
+              else
+                git commit -m "Update to ${VERSION}"
+                git push origin HEAD:master
+                echo "Published ${pkg} ${VERSION} to AUR."
+              fi
+            )
+          }
+
+          publish_pkg "pinshot" "sha256sums" "${SRC_SHA}"
+          publish_pkg "pinshot-bin" "sha256sums_x86_64" "${BIN_SHA}"

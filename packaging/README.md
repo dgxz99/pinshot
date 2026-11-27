@@ -37,6 +37,20 @@ git push origin v0.1.1
 - `packaging/aur/pinshot/`：从 GitHub tag 源码离线锁定编译
 - `packaging/aur/pinshot-bin/`：直接拉取 GitHub Release 预编译包
 
+### 自动发布（推荐）
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) 内置了 `publish-aur` 任务。只需在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 配置一次密钥：
+
+- `AUR_SSH_PRIVATE_KEY`（必填）：已添加到 AUR 账号的 SSH 私钥
+- `AUR_USERNAME`（可选，默认 `daguo`）：AUR 提交作者名
+- `AUR_EMAIL`（可选，默认 `dgxz99@users.noreply.github.com`）：AUR 提交作者邮箱
+
+配置完成后：
+- 以后每次推送 `v*` tag，流水线发布 GitHub Release 后会自动计算真实 `sha256sums`、生成 `.SRCINFO` 并推送 `pinshot` 与 `pinshot-bin` 到 AUR（未配置 `AUR_SSH_PRIVATE_KEY` 时自动跳过，不影响 GitHub Release）。
+- 如需为已发布的版本补推 AUR，可在 **Actions → Release → Run workflow** 填入版本号（如 `v0.1.1`）并勾选 `publish_aur`。
+
+### 手动发布 / 更新（备选）
+
 首次推送（以 `pinshot-bin` 为例，`pinshot` 流程完全一致）：
 
 ```bash

@@ -24,7 +24,7 @@ PKG_MGR=""
 ELEVATE=""
 APT_UPDATED=false
 
-cleanup() { [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"; }
+cleanup() { [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR" || true; }
 trap cleanup EXIT
 
 usage() {
@@ -247,7 +247,7 @@ ensure_runtime_deps() {
     fi
 
     echo "[pinshot] 将执行：${cmd_str}"
-    echo "[pinshot] 正在安装运行依赖，如提示请输入提权密码..."
+    echo "[pinshot] 正在安装运行依赖..."
     if ! request_elevate || ! install_pkgs_quiet "${pkgs[@]}"; then
         echo "[pinshot] 请手动执行：${cmd_str}" >&2
         exit 1
@@ -255,29 +255,93 @@ ensure_runtime_deps() {
     echo "[pinshot] 运行依赖安装完成"
 }
 
+install_satty_from_release() {
+    local arch satty_tmp archive_path url satty_bin check_err=""
+    arch="$(uname -m)"
+    satty_tmp="$(mktemp -d)"
+    archive_path="${satty_tmp}/satty.tar.gz"
+    url="https://github.com/Satty-org/Satty/releases/latest/download/satty-${arch}-unknown-linux-gnu.tar.gz"
+
+    if ! curl -fsSL "$url" -o "$archive_path" 2>/dev/null; then
+        url="$(curl -fsSL "https://api.github.com/repos/Satty-org/Satty/releases/latest" 2>/dev/null \
+            | grep -oE "https://[^\"]+${arch}[^\"]*linux[^\"]*\.tar\.gz" | head -n 1 || true)"
+        if [[ -z "$url" ]] || ! curl -fsSL "$url" -o "$archive_path" 2>/dev/null; then
+            rm -rf "$satty_tmp"
+            return 1
+        fi
+    fi
+
+    if ! tar -xzf "$archive_path" -C "$satty_tmp" 2>/dev/null; then
+        rm -rf "$satty_tmp"
+        return 1
+    fi
+    satty_bin="$(find "$satty_tmp" -type f -name satty | head -n 1)"
+    if [[ -z "$satty_bin" ]]; then
+        rm -rf "$satty_tmp"
+        return 1
+    fi
+    mkdir -p "${BIN_DIR}"
+    install -m 0755 "$satty_bin" "${BIN_DIR}/satty"
+    rm -rf "$satty_tmp"
+
+    if ! check_err="$("${BIN_DIR}/satty" --version 2>&1)"; then
+        rm -f "${BIN_DIR}/satty"
+        [[ -n "$check_err" ]] && echo "[pinshot] satty 运行自检失败：${check_err}" >&2
+        return 1
+    fi
+}
+
 offer_optional_satty() {
-    command -v satty >/dev/null 2>&1 && return 0
+    if command -v satty >/dev/null 2>&1 || [[ -x "${BIN_DIR}/satty" ]]; then
+        return 0
+    fi
     detect_pkg_mgr
-    if [[ "$SKIP_DEPS" == false && -r /dev/tty && -w /dev/tty ]] && pkg_exists_in_repo satty; then
+    local method="" arch
+    arch="$(uname -m)"
+    if pkg_exists_in_repo satty; then
+        method="pkg"
+    elif command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && [[ "$arch" == "x86_64" || "$arch" == "aarch64" ]]; then
+        method="release"
+    fi
+
+    if [[ "$SKIP_DEPS" == false && -r /dev/tty && -w /dev/tty && -n "$method" ]]; then
         local reply=""
         printf '[pinshot] 可选组件 satty（截图/贴图标注）未安装，是否一并安装？[y/N] ' > /dev/tty
         read -r reply < /dev/tty || reply="n"
         if [[ "$reply" =~ ^[Yy]$ ]]; then
-            echo "[pinshot] 正在安装 satty..."
-            if request_elevate && install_pkgs_quiet satty; then
-                echo "[pinshot] satty 安装完成"
+            if [[ "$method" == "pkg" ]]; then
+                echo "[pinshot] 正在安装 satty..."
+                if request_elevate && install_pkgs_quiet satty; then
+                    echo "[pinshot] satty 安装完成"
+                else
+                    echo "[pinshot] satty 安装失败，可稍后手动执行：$(format_pkg_cmd satty)" >&2
+                fi
             else
-                echo "[pinshot] satty 安装失败，可稍后手动执行：$(format_pkg_cmd satty)" >&2
+                echo "[pinshot] 正在下载安装 satty 到 ${BIN_DIR}/satty..."
+                if install_satty_from_release; then
+                    echo "[pinshot] satty 安装完成：${BIN_DIR}/satty"
+                else
+                    echo "[pinshot] satty 安装失败，可前往 https://github.com/Satty-org/Satty/releases 手动安装" >&2
+                fi
             fi
         fi
     else
-        echo "[pinshot] 可选组件：未安装 satty（标注功能，可按需安装）"
+        echo "[pinshot] 可选组件：未安装 satty（标注功能，可按需安装：https://github.com/Satty-org/Satty/releases）"
     fi
 }
 
 enable_gnome_extension() {
+    local major="" version_ok=true ignore_ver="false"
+    if command -v gnome-shell >/dev/null 2>&1 && [[ -f "${EXT_DEST_DIR}/metadata.json" ]]; then
+        major="$(gnome-shell --version 2>/dev/null | sed -n 's/.*GNOME Shell \([0-9][0-9]*\).*/\1/p')"
+        if [[ -n "$major" ]] && ! grep -q "\"${major}\"" "${EXT_DEST_DIR}/metadata.json"; then
+            version_ok=false
+        fi
+    fi
+
     local auto_enabled=false
     if command -v gsettings >/dev/null 2>&1 && gsettings writable org.gnome.shell enabled-extensions >/dev/null 2>&1; then
+        ignore_ver="$(gsettings get org.gnome.shell disable-extension-version-validation 2>/dev/null || echo false)"
         local enabled disabled updated
         enabled="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true)"
         if [[ -n "$enabled" ]]; then
@@ -297,8 +361,15 @@ enable_gnome_extension() {
         fi
     fi
 
-    if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions list 2>/dev/null | grep -qx "${EXT_UUID}"; then
-        gnome-extensions enable "${EXT_UUID}" 2>/dev/null || true
+    if [[ "$version_ok" == false && "$ignore_ver" != "true" ]]; then
+        echo "[pinshot] 提示：当前为 GNOME Shell ${major}，扩展暂未声明该版本；兼容测试可运行："
+        echo "          gsettings set org.gnome.shell disable-extension-version-validation true"
+        return 0
+    fi
+
+    if command -v gnome-extensions >/dev/null 2>&1 \
+        && gnome-extensions list 2>/dev/null | grep -qx "${EXT_UUID}" \
+        && gnome-extensions enable "${EXT_UUID}" 2>/dev/null; then
         echo "[pinshot] 已启用扩展（如更新了扩展代码，请注销重登生效）"
     elif [[ "$auto_enabled" == true ]]; then
         echo "[pinshot] 已设为自启，注销并重新登录 GNOME 后自动生效"
@@ -314,15 +385,6 @@ post_install() {
     command -v notify-send >/dev/null 2>&1 || echo "[pinshot] 可选组件：未安装 notify-send（桌面通知，可按需安装）"
 
     enable_gnome_extension
-
-    if command -v gnome-shell >/dev/null 2>&1 && [[ -f "${EXT_DEST_DIR}/metadata.json" ]]; then
-        local major
-        major="$(gnome-shell --version 2>/dev/null | sed -n 's/.*GNOME Shell \([0-9][0-9]*\).*/\1/p')"
-        if [[ -n "$major" ]] && ! grep -q "\"${major}\"" "${EXT_DEST_DIR}/metadata.json"; then
-            echo "[pinshot] 提示：当前为 GNOME Shell ${major}，扩展暂未声明该版本；兼容测试可运行："
-            echo "          gsettings set org.gnome.shell disable-extension-version-validation true"
-        fi
-    fi
 
     [[ -d "/usr/share/gnome-shell/extensions/${EXT_UUID}" ]] &&
         echo "[pinshot] 提示：检测到系统级扩展 /usr/share/gnome-shell/extensions/${EXT_UUID}，用户级安装会优先覆盖它"

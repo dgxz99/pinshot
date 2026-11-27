@@ -45,16 +45,14 @@ yay -S pinshot       # Build from source
 curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash
 ```
 
-- Specific version: `curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash -s -- --version v0.1.0`
-- Prompts to install missing runtime dependencies via `sudo`
+- Specific version: `curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | PINSHOT_VERSION=v0.1.0 bash`
 
 ### Build from source
 
 Requires Git, Rust and Cargo (tested with Rust 1.100), a C toolchain, `pkg-config`, `glib-compile-schemas`, and GStreamer Core/App/Video development files in addition to the runtime dependencies:
 
 ```bash
-sudo pacman -S --needed git base-devel glib2 wl-clipboard pango xdg-desktop-portal-gnome \
-  pipewire wireplumber gstreamer gst-plugins-base gst-plugins-base-libs gst-plugin-pipewire
+sudo pacman -S --needed git base-devel glib2 wl-clipboard pango xdg-desktop-portal-gnome pipewire wireplumber gstreamer gst-plugins-base gst-plugins-base-libs gst-plugin-pipewire
 ```
 
 ```bash
@@ -217,11 +215,11 @@ Text-card and cache settings apply to new items immediately. The extension reads
 
 ### Uninstall
 
-- **Script install** (removes CLI, extension, and launcher; add `--purge` for a full uninstall including config, cache, and GSettings):
+- **Script install** (removes CLI, extension, and launcher; set `PINSHOT_PURGE=1` for a full uninstall including config, cache, and GSettings):
   ```bash
   curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash
   # Full uninstall (keeps exported PNG/GIF files):
-  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash -s -- --purge
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | PINSHOT_PURGE=1 bash
   ```
   If you cloned the repository, you can run `./scripts/uninstall.sh` or `./scripts/uninstall.sh --purge` directly.
 - **AUR install:**

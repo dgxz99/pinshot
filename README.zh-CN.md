@@ -45,16 +45,14 @@ yay -S pinshot       # 从源码构建
 curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash
 ```
 
-- 指定版本：`curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | bash -s -- --version v0.1.0`
-- 缺少运行依赖时会提示通过 `sudo` 自动安装
+- 指定版本：`curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/install.sh | PINSHOT_VERSION=v0.1.0 bash`
 
 ### 从源码构建
 
 除运行依赖外，还需要 Git、Rust 与 Cargo（已用 Rust 1.100 验证）、C 工具链、`pkg-config`、`glib-compile-schemas` 和 GStreamer Core/App/Video 开发库：
 
 ```bash
-sudo pacman -S --needed git base-devel glib2 wl-clipboard pango xdg-desktop-portal-gnome \
-  pipewire wireplumber gstreamer gst-plugins-base gst-plugins-base-libs gst-plugin-pipewire
+sudo pacman -S --needed git base-devel glib2 wl-clipboard pango xdg-desktop-portal-gnome pipewire wireplumber gstreamer gst-plugins-base gst-plugins-base-libs gst-plugin-pipewire
 ```
 
 ```bash
@@ -217,11 +215,11 @@ padding_px = 16
 
 ### 卸载
 
-- **脚本安装**（移除 CLI、扩展与应用入口；加 `--purge` 完全卸载并清理配置、缓存与 GSettings 设置）：
+- **脚本安装**（移除 CLI、扩展与应用入口；加 `PINSHOT_PURGE=1` 完全卸载并清理配置、缓存与 GSettings 设置）：
   ```bash
   curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash
   # 完全卸载（已导出的 PNG/GIF 保留）：
-  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash -s -- --purge
+  curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | PINSHOT_PURGE=1 bash
   ```
   如已克隆仓库，可直接运行 `./scripts/uninstall.sh` 或 `./scripts/uninstall.sh --purge`。
 - **AUR 安装**：

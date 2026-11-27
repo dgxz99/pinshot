@@ -14,13 +14,16 @@ CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/pinshot"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/pinshot"
 
 PURGE=false
+case "${PINSHOT_PURGE:-}" in
+    1|true|TRUE|yes|YES) PURGE=true ;;
+esac
 
 usage() {
     cat <<EOF
 用法:
   普通卸载: ./scripts/uninstall.sh
   完全卸载: ./scripts/uninstall.sh --purge
-  远程完全卸载: curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | bash -s -- --purge
+  远程完全卸载: curl -fsSL https://raw.githubusercontent.com/dgxz99/pinshot/main/scripts/uninstall.sh | PINSHOT_PURGE=1 bash
 
 选项:
   --purge  完全卸载：同时删除缓存 (${CACHE_DIR})、配置 (${CONFIG_DIR}) 与扩展 GSettings 设置

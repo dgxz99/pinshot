@@ -370,7 +370,7 @@ enable_gnome_extension() {
     if command -v gnome-extensions >/dev/null 2>&1 \
         && gnome-extensions list 2>/dev/null | grep -qx "${EXT_UUID}" \
         && gnome-extensions enable "${EXT_UUID}" 2>/dev/null; then
-        echo "[pinshot] 已启用扩展（如更新了扩展代码，请注销重登生效）"
+        echo "[pinshot] 已启用扩展"
     elif [[ "$auto_enabled" == true ]]; then
         echo "[pinshot] 已设为自启，注销并重新登录 GNOME 后自动生效"
     else
@@ -388,8 +388,13 @@ post_install() {
 
     [[ -d "/usr/share/gnome-shell/extensions/${EXT_UUID}" ]] &&
         echo "[pinshot] 提示：检测到系统级扩展 /usr/share/gnome-shell/extensions/${EXT_UUID}，用户级安装会优先覆盖它"
-    [[ ":${PATH}:" != *":${BIN_DIR}:"* ]] &&
-        echo "[pinshot] 提示：可将 ${BIN_DIR} 加入 PATH：export PATH=\"\$HOME/.local/bin:\$PATH\""
+    if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
+        if [[ "${SHELL:-}" == */fish ]]; then
+            echo "[pinshot] 提示：可将 ${BIN_DIR} 加入 PATH：fish_add_path ~/.local/bin"
+        else
+            echo "[pinshot] 提示：可将 ${BIN_DIR} 加入 PATH：export PATH=\"\$HOME/.local/bin:\$PATH\""
+        fi
+    fi
 
     if [[ "$deps_ok" == true ]]; then
         echo "[pinshot] 安装完成"

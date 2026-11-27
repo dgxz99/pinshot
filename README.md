@@ -14,7 +14,7 @@
 
 Pin a screenshot, an image, or a copied snippet next to your work so you can refer to it without switching windows. Pins stay above ordinary windows and follow you across workspaces. They’re drawn by GNOME Shell, so they don’t show up in `Alt+Tab`.
 
-**Supported desktop:** GNOME Shell 50 / 51 on Wayland. Tested on Arch Linux (GNOME Shell 51) and Ubuntu 26.04 (GNOME Shell 50).
+**Supported desktop:** GNOME Shell 50 / 51 on Wayland.
 
 ![Pinshot’s adjustable capture area and action toolbar on GNOME Wayland](docs/images/region-capture.png)
 
@@ -74,14 +74,24 @@ For development, `--symlink` links the extension directory to the checkout; `--s
 
 ### Enable the extension
 
-On GNOME Wayland, **log out and back in** after installing or updating the extension. The install script pre-enables it automatically; for AUR installs, enable it once after logging back in, then verify:
+GNOME Wayland only loads newly installed or updated extensions when a session starts, so **log out and back in** after installing:
+
+- **Script / source install:** the script pre-enables the extension automatically, so it activates as soon as you log back in.
+- **AUR install:** system packages don’t modify per-user GNOME settings; after logging back in, enable it once (or turn it on in the Extensions app):
 
 ```bash
 gnome-extensions enable pinshot@dgxz99
+```
+
+Verify that the extension is online (returns `gnome-shell-50` or `gnome-shell-51`):
+
+```bash
 pinshot ping
 ```
 
-A response like `gnome-shell-50` or `gnome-shell-51` means the extension is online. If you used the install script and `~/.local/bin` is not in `PATH`, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile or run `~/.local/bin/pinshot`.
+> For script installs, if `pinshot` isn’t found in your terminal, add `~/.local/bin` to `PATH`:
+> - **Bash / Zsh:** add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` or `~/.zshrc`
+> - **Fish:** run `fish_add_path ~/.local/bin`
 
 ## Quick start
 

@@ -14,7 +14,7 @@
 
 把截图、图片或刚复制的代码贴在桌面上，对照参考资料时不用来回切窗口。贴图默认在普通窗口上方，切换工作区后仍可见。它由 GNOME Shell 直接绘制，不会出现在 `Alt+Tab` 列表里。
 
-**支持环境：** GNOME Shell 50 / 51（Wayland）。已在 Arch Linux（GNOME Shell 51）与 Ubuntu 26.04（GNOME Shell 50）上验证。
+**支持环境：** GNOME Shell 50 / 51（Wayland）。
 
 ![GNOME Wayland 中 Pinshot 的可调截图选区和操作工具条](docs/images/region-capture.png)
 
@@ -74,14 +74,24 @@ cd pinshot
 
 ### 启用扩展
 
-首次安装或更新扩展后，**注销并重新登录 GNOME**。脚本安装会自动将扩展加入自启列表；AUR 安装在重登录后执行一次启用即可：
+GNOME Wayland 仅在会话启动时加载新安装或更新后的扩展，因此安装后需**注销并重新登录 GNOME**：
+
+- **脚本 / 源码安装**：脚本已自动将扩展设为自启，重登录后直接生效。
+- **AUR 安装**：系统级安装包不会修改用户 GNOME 配置，重登录后执行一次启用（或在「扩展」应用中开启）：
 
 ```bash
 gnome-extensions enable pinshot@dgxz99
+```
+
+验证扩展是否在线（返回 `gnome-shell-50` 或 `gnome-shell-51`）：
+
+```bash
 pinshot ping
 ```
 
-返回 `gnome-shell-50` 或 `gnome-shell-51` 表示扩展已在线。脚本安装若当前终端 `PATH` 未包含 `~/.local/bin`，可在 `~/.bashrc` 中加入 `export PATH="$HOME/.local/bin:$PATH"` 或直接运行 `~/.local/bin/pinshot`。
+> 脚本安装如提示找不到 `pinshot`，请将 `~/.local/bin` 加入 `PATH`：
+> - **Bash / Zsh**：在 `~/.bashrc` 或 `~/.zshrc` 中添加 `export PATH="$HOME/.local/bin:$PATH"`
+> - **Fish**：运行 `fish_add_path ~/.local/bin`
 
 ## 快速上手
 

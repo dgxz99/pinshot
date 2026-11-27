@@ -39,6 +39,33 @@ if command -v gnome-extensions >/dev/null 2>&1; then
     gnome-extensions disable "${EXT_UUID}" 2>/dev/null || true
 fi
 
+if command -v gsettings >/dev/null 2>&1 && gsettings writable org.gnome.shell enabled-extensions >/dev/null 2>&1; then
+    current_enabled="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true)"
+    if [[ "$current_enabled" == *"'${EXT_UUID}'"* ]]; then
+        inner="${current_enabled#\[}"
+        inner="${inner%\]}"
+        kept=()
+        IFS=','
+        for entry in $inner; do
+            trimmed="${entry#"${entry%%[![:space:]]*}"}"
+            trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+            if [[ -n "$trimmed" && "$trimmed" != "'${EXT_UUID}'" ]]; then
+                kept+=("$trimmed")
+            fi
+        done
+        unset IFS
+        if [[ ${#kept[@]} -eq 0 ]]; then
+            gsettings set org.gnome.shell enabled-extensions "@as []" 2>/dev/null || true
+        else
+            joined=""
+            for entry in "${kept[@]}"; do
+                joined="${joined:+${joined}, }${entry}"
+            done
+            gsettings set org.gnome.shell enabled-extensions "[${joined}]" 2>/dev/null || true
+        fi
+    fi
+fi
+
 if [[ -e "${BIN_PATH}" || -L "${BIN_PATH}" ]]; then
     rm -f "${BIN_PATH}"
     echo "[pinshot] 已移除 CLI: ${BIN_PATH}"

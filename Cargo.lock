@@ -975,7 +975,7 @@ checksum = "c938015719552d665fd0553b90d96cd7ff58e83e4c061ca99e6bb78865a72752"
 
 [[package]]
 name = "pinshot-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "pinshot-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ashpd",
  "chrono",

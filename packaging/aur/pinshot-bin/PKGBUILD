@@ -1,7 +1,7 @@
 # Maintainer: daguo <dgxz99@users.noreply.github.com>
 
 pkgname=pinshot-bin
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Lightweight Wayland screenshot, screen-pinning, scrolling capture and GIF tool for GNOME Shell (prebuilt binary)'
 arch=('x86_64')
@@ -27,7 +27,7 @@ provides=('pinshot')
 conflicts=('pinshot' 'pinshot-git')
 install="${pkgname}.install"
 source_x86_64=("${url}/releases/download/v${pkgver}/pinshot-v${pkgver}-linux-x86_64.tar.gz")
-# 发布 v0.1.1 Release 后运行 `updpkgsums && makepkg --printsrcinfo > .SRCINFO` 填入真实校验和
+# 发布 v0.2.0 Release 后运行 `updpkgsums && makepkg --printsrcinfo > .SRCINFO` 填入真实校验和
 sha256sums_x86_64=('SKIP')
 
 package() {

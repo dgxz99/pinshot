@@ -1,7 +1,7 @@
 # Maintainer: daguo <dgxz99@users.noreply.github.com>
 
 pkgname=pinshot
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Lightweight Wayland screenshot, screen-pinning, scrolling capture and GIF tool for GNOME Shell'
 arch=('x86_64')

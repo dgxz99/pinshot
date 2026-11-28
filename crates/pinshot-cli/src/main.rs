@@ -492,13 +492,14 @@ fn cmd_pin_clipboard() -> Result<()> {
                 &cfg.cache,
             )?
         }
-        ClipboardContent::Text(raw_text) => {
-            let rendered = text_render::render_text_card(&raw_text, &cfg.text_card)?;
+        ClipboardContent::Text { plain, html } => {
+            let rendered =
+                text_render::render_clipboard_text_card(&plain, html.as_deref(), &cfg.text_card)?;
             store.add_png_entry(
                 NewEntryRequest {
                     kind: PinKind::ClipboardText,
                     png_bytes: &rendered.png_bytes,
-                    text_content: Some(&raw_text),
+                    text_content: Some(&plain),
                     title_preview: rendered.title_preview,
                     source_scale: rendered.source_scale,
                     active: true,
@@ -858,7 +859,7 @@ fn run_internal_ocr_pin(cfg: &Config, id: &str, force: bool) -> Result<OcrPinRes
     #[cfg(feature = "ocr")]
     {
         let doc = ocr::engine::recognize_image_file(&record.image_path, &model, &cfg.ocr)?;
-        let _ = store.save_ocr(id, &doc);
+        let _ = store.save_ocr_if_current(id, record.revision, &doc);
         Ok(OcrPinResponse::Ok { document: doc })
     }
     #[cfg(not(feature = "ocr"))]

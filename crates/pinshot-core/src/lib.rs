@@ -11,6 +11,7 @@ pub mod longshot;
 pub mod notify;
 pub mod ocr;
 pub mod protocol;
+mod rich_text;
 pub mod store;
 pub mod text_render;
 

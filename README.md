@@ -23,7 +23,7 @@ Pin a screenshot, an image, or a copied snippet next to your work so you can ref
 | Feature | What it does |
 | --- | --- |
 | Region & fullscreen capture | Freeze the desktop and adjust the selection with eight handles, or grab the active monitor fullscreen. Copy, save, pin in place, or annotate. |
-| Desktop pins | Keep screenshots, clipboard images, and text cards on top. Region screenshots pin 1:1 where you selected them; move, resize, change opacity, collapse, or let clicks pass through. |
+| Desktop pins | Keep screenshots, clipboard images, and text/code cards on top (preserves IDE/browser rich-text colors and styles with snug auto-sized card width). Region screenshots pin 1:1 where you selected them; move, resize, change opacity, collapse, or let clicks pass through. |
 | Offline on-pin OCR | Automatically recognizes Chinese, English, and code text in the background on every pin. Hover over text to select and copy directly—no OCR button needed, 100% offline. |
 | Scrolling capture | Capture a page or scrollable panel vertically or horizontally. Extend either end of the chosen axis without repeating overlapping content. |
 | GIF recording | Choose a frame rate before recording, include the pointer, and stop to save a looping GIF. |

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -55,6 +55,9 @@ pub struct PinRecord {
     pub height: u32,
     pub source_scale: f64,
     pub size_bytes: u64,
+    /// 图片内容修订号（标注替换原图时递增，用于防止后台 OCR 将旧图结果写回新图）
+    #[serde(default)]
+    pub revision: u64,
 }
 
 impl PinRecord {
@@ -133,6 +136,26 @@ impl PinStore {
 
     fn index_path(&self) -> PathBuf {
         self.root_dir.join("index.json")
+    }
+
+    fn index_lock_path(&self) -> PathBuf {
+        self.root_dir.join("index.lock")
+    }
+
+    /// 获取跨进程/跨线程排他文件锁，串行化 `index.json` 的「读取 → 修改 → 写回」及关联文件清理
+    fn lock_index_exclusive(&self) -> Result<fs::File> {
+        self.ensure_layout()?;
+        let lock_path = self.index_lock_path();
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|e| PinshotError::io(&lock_path, e))?;
+        let _ = set_unix_mode(&lock_path, 0o600);
+        file.lock().map_err(|e| PinshotError::io(&lock_path, e))?;
+        Ok(file)
     }
 
     fn screencast_token_path(&self) -> PathBuf {
@@ -215,8 +238,10 @@ impl PinStore {
             height,
             source_scale,
             size_bytes: total_size,
+            revision: 0,
         };
 
+        let _guard = self.lock_index_exclusive()?;
         let mut index = self.load_index()?;
         index.entries.push(record.clone());
         prune_with_config(&mut index.entries, now, cache_cfg);
@@ -238,6 +263,7 @@ impl PinStore {
         let (width, height) = img.dimensions();
         let thumb_bytes = render_thumbnail_png(&img, THUMB_MAX_EDGE)?;
 
+        let _guard = self.lock_index_exclusive()?;
         let mut index = self.load_index()?;
         let pos = index
             .entries
@@ -282,14 +308,15 @@ impl PinStore {
                 height: old_entry.height,
                 source_scale: old_entry.source_scale,
                 size_bytes: backup_size,
+                revision: old_entry.revision,
             };
             index.entries.push(backup_record);
         }
 
-        // 用新图片覆盖当前贴图绑定的文件，并作废旧 OCR 缓存
+        // 原子替换当前贴图绑定的文件（避免并发 OCR 读到半写文件），并作废旧 OCR 缓存
         let target = &mut index.entries[pos];
-        write_file_private(&target.image_path, new_png_bytes)?;
-        write_file_private(&target.thumb_path, &thumb_bytes)?;
+        write_file_private_atomic(&target.image_path, new_png_bytes)?;
+        write_file_private_atomic(&target.thumb_path, &thumb_bytes)?;
         let _ = remove_if_exists(&self.ocr_path(id));
 
         let text_bytes = target
@@ -304,6 +331,7 @@ impl PinStore {
         target.last_used_at = now;
         target.active = true;
         target.size_bytes = new_png_bytes.len() as u64 + thumb_bytes.len() as u64 + text_bytes;
+        target.revision = target.revision.saturating_add(1);
 
         let updated = target.clone();
         prune_with_config(&mut index.entries, now, cache_cfg);
@@ -337,6 +365,34 @@ impl PinStore {
 
     /// 以 `0600` 权限原子写入贴图 OCR 缓存
     pub fn save_ocr(&self, id: &str, doc: &OcrDocument) -> Result<()> {
+        let _guard = self.lock_index_exclusive()?;
+        self.write_ocr_unlocked(id, doc)
+    }
+
+    /// 仅当贴图记录仍存在且图片版本与启动识别时一致时写入 OCR 缓存；若已清理或已被标注替换则丢弃并返回 `Ok(false)`
+    pub fn save_ocr_if_current(
+        &self,
+        id: &str,
+        expected_revision: u64,
+        doc: &OcrDocument,
+    ) -> Result<bool> {
+        let _guard = self.lock_index_exclusive()?;
+        let index = self.load_index()?;
+        let Some(entry) = index.entries.iter().find(|entry| entry.id == id) else {
+            return Ok(false);
+        };
+        if entry.revision != expected_revision
+            || entry.width != doc.image_width
+            || entry.height != doc.image_height
+            || !entry.image_path.exists()
+        {
+            return Ok(false);
+        }
+        self.write_ocr_unlocked(id, doc)?;
+        Ok(true)
+    }
+
+    fn write_ocr_unlocked(&self, id: &str, doc: &OcrDocument) -> Result<()> {
         self.ensure_layout()?;
         let target = self.ocr_path(id);
         let bytes = serde_json::to_vec(doc)?;
@@ -360,6 +416,7 @@ impl PinStore {
     }
 
     fn set_active_state(&self, id: &str, active: bool) -> Result<bool> {
+        let _guard = self.lock_index_exclusive()?;
         let mut index = self.load_index()?;
         let Some(entry) = index.entries.iter_mut().find(|entry| entry.id == id) else {
             return Ok(false);
@@ -408,6 +465,7 @@ impl PinStore {
 
     /// 清空历史缓存：默认仅清非活跃条目；`include_active = true` 时全部清空并返回被删活跃 ID
     pub fn clear_history(&self, include_active: bool) -> Result<(usize, Vec<String>)> {
+        let _guard = self.lock_index_exclusive()?;
         let mut index = self.load_index()?;
         let mut removed_count = 0usize;
         let mut removed_active_ids = Vec::new();
@@ -432,6 +490,7 @@ impl PinStore {
 
     #[cfg(test)]
     fn enforce_retention_at(&self, now: u64, max_bytes: u64, max_age_secs: u64) -> Result<usize> {
+        let _guard = self.lock_index_exclusive()?;
         let mut index = self.load_index()?;
         let removed_count = prune_index_entries(&mut index.entries, now, max_bytes, max_age_secs);
         if removed_count > 0 {
@@ -607,6 +666,21 @@ fn render_thumbnail_png(img: &image::DynamicImage, max_edge: u32) -> Result<Vec<
 
 fn write_file_private(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::write(path, bytes).map_err(|e| PinshotError::io(path, e))?;
+    set_unix_mode(path, 0o600)?;
+    Ok(())
+}
+
+/// 原子替换已有私有文件，防止并发读取方看到半写文件
+fn write_file_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| PinshotError::io(path, std::io::Error::other("缺少父目录")))?;
+    let mut temp =
+        tempfile::NamedTempFile::new_in(parent).map_err(|e| PinshotError::io(path, e))?;
+    temp.write_all(bytes)
+        .map_err(|e| PinshotError::io(temp.path(), e))?;
+    temp.persist(path)
+        .map_err(|e| PinshotError::io(path, e.error))?;
     set_unix_mode(path, 0o600)?;
     Ok(())
 }
@@ -1023,6 +1097,121 @@ mod tests {
         store.save_ocr(&rec.id, &doc).unwrap();
         assert!(store.ocr_path(&rec.id).exists());
         store.clear_history(true).unwrap();
+        assert!(!store.ocr_path(&rec.id).exists());
+    }
+
+    #[test]
+    fn concurrent_mark_closed_does_not_lose_updates() {
+        let dir = TempDir::new().expect("创建临时目录失败");
+        let root = dir.path().join("pinshot");
+        let store = PinStore::open_at(root.clone()).expect("打开缓存失败");
+        let cfg = CacheConfig::default();
+        let png = make_test_png(64, 64, 7);
+
+        let ids: Vec<String> = (0..20)
+            .map(|i| {
+                store
+                    .add_png_entry(
+                        NewEntryRequest {
+                            kind: PinKind::Screenshot,
+                            png_bytes: &png,
+                            text_content: None,
+                            title_preview: format!("pin-{i}"),
+                            source_scale: 1.0,
+                            active: true,
+                        },
+                        &cfg,
+                    )
+                    .unwrap()
+                    .id
+            })
+            .collect();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(ids.len()));
+        let handles: Vec<_> = ids
+            .iter()
+            .cloned()
+            .map(|id| {
+                let root = root.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let s = PinStore::open_at(root).unwrap();
+                    barrier.wait();
+                    assert!(s.mark_closed(&id).unwrap());
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert!(
+            store.list_active().unwrap().is_empty(),
+            "并发关闭 20 张贴图后不应残留活跃条目"
+        );
+        assert_eq!(store.history_count().unwrap(), 20);
+    }
+
+    #[test]
+    fn save_ocr_if_current_discards_stale_results_after_clear_or_replace() {
+        let dir = TempDir::new().expect("创建临时目录失败");
+        let store = PinStore::open_at(dir.path().join("pinshot")).expect("打开缓存失败");
+        let cfg = CacheConfig::default();
+
+        let png_v0 = make_test_png(120, 80, 1);
+        let png_v1_same_size = make_test_png(120, 80, 9);
+        let rec = store
+            .add_png_entry(
+                NewEntryRequest {
+                    kind: PinKind::Screenshot,
+                    png_bytes: &png_v0,
+                    text_content: None,
+                    title_preview: "ocr-guard".to_string(),
+                    source_scale: 1.0,
+                    active: true,
+                },
+                &cfg,
+            )
+            .unwrap();
+
+        let doc = OcrDocument {
+            version: crate::ocr::OCR_SCHEMA_VERSION,
+            model_id: "ppocrv5-mobile".to_string(),
+            image_width: 120,
+            image_height: 80,
+            lines: Vec::new(),
+        };
+
+        assert!(
+            store
+                .save_ocr_if_current(&rec.id, rec.revision, &doc)
+                .unwrap()
+        );
+        assert!(store.ocr_path(&rec.id).exists());
+
+        // 同尺寸替换原图后，旧 revision 推理完成的 OCR 不得写回
+        let replaced = store
+            .replace_entry_image(&rec.id, &png_v1_same_size, &cfg)
+            .unwrap();
+        assert_eq!(replaced.revision, rec.revision + 1);
+        assert!(!store.ocr_path(&rec.id).exists());
+        assert!(
+            !store
+                .save_ocr_if_current(&rec.id, rec.revision, &doc)
+                .unwrap(),
+            "图片被替换后旧 revision 的 OCR 结果应被丢弃"
+        );
+        assert!(!store.ocr_path(&rec.id).exists());
+
+        // 清理历史后，即便携带最新 revision 也不得把 ocr/<id>.json 写回磁盘
+        store.clear_history(true).unwrap();
+        assert!(
+            !store
+                .save_ocr_if_current(&rec.id, replaced.revision, &doc)
+                .unwrap(),
+            "清理历史后后台 OCR 结果不得写回"
+        );
         assert!(!store.ocr_path(&rec.id).exists());
     }
 }

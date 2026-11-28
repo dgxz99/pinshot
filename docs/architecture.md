@@ -8,7 +8,7 @@ Pinshot 由 GNOME Shell 扩展和按需运行的 Rust CLI 组成。贴图不是�
 | --- | --- |
 | [GNOME Shell 扩展](../extensions/pinshot@dgxz99/) | 全局快捷键、首选项、原生顶栏图标菜单（`panelIndicator.js`）、冻结画面框选与全屏抓取（`screenshot.js`）、采集控制条（`longshot.js`）和贴图。`pinManager.js` 将贴图容器挂在 Shell 的 `uiGroup` 并调度串行后台 OCR 队列；`pinActor.js` 与 `ocrSelection.js` 管理单张贴图的纹理、原位定位、离线划词选区和销毁 |
 | [Rust CLI](../crates/pinshot-cli/) | 命令入口和输出动作分派，协调扩展与 Core。顶栏菜单与贴图右键菜单中的采集、复制、标注、保存、离线 OCR 等操作通过异步子进程调用 CLI |
-| [Rust Core](../crates/pinshot-core/) | 剪贴板读写、Pango 文字卡片、可选 Satty 标注、纯 Rust 离线 PP-OCRv5 推理（`ocr/`）、通知图标解析、缓存与导出，以及 PipeWire 采帧、滚动拼接和 GIF 编码 |
+| [Rust Core](../crates/pinshot-core/) | 剪贴板读写（含 `text/html` 富文本样式解析）、Pango 动态宽度文字/代码卡片、可选 Satty 标注、纯 Rust 离线 PP-OCRv5 推理（`ocr/`）、通知图标解析、缓存与导出，以及 PipeWire 采帧、滚动拼接和 GIF 编码 |
 | [桌面入口与打包](../packaging/) | 轻量 `.desktop` 应用启动器（[data/io.github.dgxz99.pinshot.desktop](../data/io.github.dgxz99.pinshot.desktop)）、发布包组装脚本（[scripts/package-release.sh](../scripts/package-release.sh)）与 AUR `PKGBUILD` 配置 |
 
 CLI 和扩展通过会话 D-Bus 通信。服务名为 `io.github.dgxz99.Pinshot.Frontend`，对象路径为 `/io/github/dgxz99/Pinshot/Frontend`，接口为 `io.github.dgxz99.Pinshot.Frontend1`。接口定义见 [`dbusService.js`](../extensions/pinshot@dgxz99/dbusService.js)，Rust 客户端见 [`dbus_client.rs`](../crates/pinshot-core/src/dbus_client.rs)。截图和剪贴板 PNG 通过文件描述符传输，不把图像数据直接放进 D-Bus 消息体。

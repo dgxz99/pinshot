@@ -65,16 +65,17 @@ export class PinContextMenu {
             firePinshot(['internal', 'copy-image', pin.id]);
         });
 
-        if (pin.hasText) {
-            this._menu.addAction('复制原始文本', () => {
-                firePinshot(['internal', 'copy-text', pin.id]);
+        if (pin.hasText || pin.hasOcrText()) {
+            this._menu.addAction('复制纯文本', () => {
+                if (pin.hasText) {
+                    firePinshot(['internal', 'copy-text', pin.id]);
+                } else {
+                    pin.copyAllOcrText();
+                }
             });
         }
 
         if (pin.hasOcrText()) {
-            this._menu.addAction('复制全部文字 (OCR)', () => {
-                pin.copyAllOcrText();
-            });
             this._menu.addAction(
                 pin.ocrModeEnabled ? '暂时关闭划词（纯拖拽模式）' : '恢复划词选字',
                 () => pin.toggleOcrMode()

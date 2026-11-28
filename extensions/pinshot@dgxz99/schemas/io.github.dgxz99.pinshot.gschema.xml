@@ -62,5 +62,8 @@
     <key name="panel-icon-style" type="s">
       <default>'color'</default>
     </key>
+    <key name="pin-ocr-enabled" type="b">
+      <default>true</default>
+    </key>
   </schema>
 </schemalist>

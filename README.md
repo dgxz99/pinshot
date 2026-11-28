@@ -24,6 +24,7 @@ Pin a screenshot, an image, or a copied snippet next to your work so you can ref
 | --- | --- |
 | Region & fullscreen capture | Freeze the desktop and adjust the selection with eight handles, or grab the active monitor fullscreen. Copy, save, pin in place, or annotate. |
 | Desktop pins | Keep screenshots, clipboard images, and text cards on top. Region screenshots pin 1:1 where you selected them; move, resize, change opacity, collapse, or let clicks pass through. |
+| Offline on-pin OCR | Automatically recognizes Chinese, English, and code text in the background on every pin. Hover over text to select and copy directly—no OCR button needed, 100% offline. |
 | Scrolling capture | Capture a page or scrollable panel vertically or horizontally. Extend either end of the chosen axis without repeating overlapping content. |
 | GIF recording | Choose a frame rate before recording, include the pointer, and stop to save a looping GIF. |
 | Top-bar menu & launcher | GNOME top-bar icon (color or monochrome) with quick actions and a shortcut toggle, plus an application launcher for Preferences and quick captures. |
@@ -124,14 +125,15 @@ Copy an image or some text in any app and press `Super+Shift+V`. Pinshot doesn�
 
 | Action | Gesture |
 | --- | --- |
-| Select and bring forward / move | Left-click / drag |
-| Close and keep in history | Double-click or middle-click |
+| Select and bring forward / move | Left-drag on blank area, edge grip, or while holding `Alt` |
+| Select text on a pin (OCR) | Hover over text and left-drag (double-click to select a word; click floating Copy or press `Ctrl+C`) |
+| Close and keep in history | Double-click blank area or middle-click |
 | Zoom / change opacity | Scroll / `Ctrl`+scroll |
-| Copy, annotate, save, or reset the size | Right-click for the menu |
+| Copy, annotate, save, OCR, or reset size | Right-click for the menu |
 | Collapse or expand a pin | Right-click menu or `Shift+R` |
 | Enable click-through | Right-click menu or `T` |
 
-When a pin receives keyboard input, `Ctrl+C` copies it, `E` opens Satty, `0` resets its size, and `Esc` closes it. If another window is receiving the keys, use the pin’s right-click menu instead. Once click-through is enabled, use `Super+Shift+U`, the top-bar menu, or `pinshot unghost-all` to regain mouse control. By default, pins on a display temporarily hide when an app goes fullscreen there.
+When a pin receives keyboard input, `Ctrl+C` copies selected text (or the image when nothing is selected), `Ctrl+A` selects all recognized text, `E` opens Satty, `0` resets its size, and `Esc` clears text selection or closes the pin. If another window is receiving the keys, use the pin’s right-click menu instead. Once click-through is enabled, use `Super+Shift+U`, the top-bar menu, or `pinshot unghost-all` to regain mouse control. By default, pins on a display temporarily hide when an app goes fullscreen there.
 
 ### Capture scrolling content
 
@@ -160,6 +162,7 @@ Open extension preferences (**快捷键 / Shortcuts**, **截图 / Screenshots**,
 | Filename prefix | Defaults to `pinshot`. Filenames include the local save time, such as `pinshot-20261121-214530.png`, with `-1`, `-2` suffixes on collision. |
 | Automatically save to disk | Off by default. When enabled, also exports pinned, annotated, and fullscreen captures. Explicit Save and GIF stopping always write to disk. |
 | Screenshot completion notifications | Off by default. Controls success notifications for screenshot flows. |
+| On-pin text selection (offline OCR) | On by default. Toggle globally on the Screenshots page, or switch individual pins to drag-only mode from the context menu. |
 | Top-bar icon & style | Show or hide the GNOME top-bar icon and switch between the **color** logo (default) and **monochrome** symbolic icon. Applies immediately. |
 
 ### Cache and history
@@ -206,6 +209,15 @@ max_lines = 80
 prose_font = "Sans 12"
 code_font = "Monospace 11"
 padding_px = 16
+
+[ocr]
+enabled = true
+auto_on_pin = true
+model = "ppocrv5-mobile"          # looks up ~/.local/share/pinshot/ocr/<model>/ then /usr/share/pinshot/ocr/<model>/
+model_dir = ""                    # optional custom model directory
+min_confidence = 0.6
+threads = 0                       # 0 = auto
+max_image_edge_px = 4096
 ```
 
 Text-card and cache settings apply to new items immediately. The extension reads `[pin]` settings on startup; log out and back in after changing them.
@@ -235,8 +247,8 @@ Text-card and cache settings apply to new items immediately. The extension reads
 - **AUR install:**
   ```bash
   sudo pacman -Rns pinshot-bin   # or pinshot
-  # Optional: remove user config, cache, and GSettings
-  rm -rf ~/.config/pinshot ~/.cache/pinshot && dconf reset -f /io/github/dgxz99/pinshot/
+  # Optional: remove user config, cache, user OCR models, and GSettings
+  rm -rf ~/.config/pinshot ~/.cache/pinshot ~/.local/share/pinshot && dconf reset -f /io/github/dgxz99/pinshot/
   ```
 
 ## License

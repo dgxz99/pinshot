@@ -20,9 +20,14 @@ const DEFAULT_PIN_CONFIG = {
  * 贴图生命周期、顶层非窗口容器、全屏避让与多屏回收管理器
  */
 export class PinManager {
-    constructor() {
+    constructor(settings = null) {
+        this._settings = settings;
         this._pins = new Map();
         this._config = {...DEFAULT_PIN_CONFIG};
+        this._ocrEnabled = settings ? settings.get_boolean('pin-ocr-enabled') : true;
+        this._ocrQueue = [];
+        this._ocrRunning = false;
+        this._ocrDownloading = false;
         this._userHidden = false;
         this._systemHidden = false;
         this._destroyed = false;
@@ -39,6 +44,9 @@ export class PinManager {
         this._monitorsSignalId = Main.layoutManager.connect('monitors-changed', () => {
             this._handleMonitorsChanged();
         });
+        this._ocrSettingId = settings
+            ? settings.connect('changed::pin-ocr-enabled', () => this._handleOcrSettingChanged())
+            : 0;
 
         this._selectedPin = null;
         this._selectionSignalId = global.stage.connect('captured-event',
@@ -73,11 +81,18 @@ export class PinManager {
             onRequestClose: id => this.closePin(id, {notifyCore: true}),
             onRaise: actorObj => this._raisePin(actorObj),
             onSelect: actorObj => this._selectPin(actorObj),
+            onRequestForceOcr: id => this.enqueuePinOcr(id, {force: true}),
+            onRequestDownloadOcrModels: () => this.downloadOcrModelsAndRetry(),
+        }, {
+            ocrEnabled: this._ocrEnabled,
         });
 
         this._pins.set(payload.id, pin);
         this._container.add_child(pin.actor);
         this._syncFullscreenVisibility();
+        if (this._ocrEnabled) {
+            this.enqueuePinOcr(payload.id);
+        }
         return true;
     }
 
@@ -91,6 +106,9 @@ export class PinManager {
         }
         pin.updatePayload(payload);
         this._raisePin(pin);
+        if (this._ocrEnabled) {
+            this.enqueuePinOcr(id);
+        }
         return true;
     }
 
@@ -188,8 +206,10 @@ export class PinManager {
         if (type === Clutter.EventType.BUTTON_PRESS) {
             const [x, y] = event.get_coords();
             const hit = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x, y);
-            if (hit !== pin.actor || event.get_button() === Clutter.BUTTON_SECONDARY) {
-                this._selectPin(null);
+            if (!pin.ownsActor(hit) || event.get_button() === Clutter.BUTTON_SECONDARY) {
+                if (event.get_button() !== Clutter.BUTTON_SECONDARY) {
+                    this._selectPin(null);
+                }
             }
             return Clutter.EVENT_PROPAGATE;
         }
@@ -205,9 +225,22 @@ export class PinManager {
             Clutter.ModifierType.MOD1_MASK |
             Clutter.ModifierType.SUPER_MASK
         );
-        if (key === Clutter.KEY_c && modifiers === Clutter.ModifierType.CONTROL_MASK) {
-            firePinshot(['internal', 'copy-image', pin.id]);
+        if ((key === Clutter.KEY_c || key === Clutter.KEY_C) &&
+            modifiers === Clutter.ModifierType.CONTROL_MASK) {
+            if (pin.hasTextSelection()) {
+                pin.copySelectedText();
+            } else {
+                firePinshot(['internal', 'copy-image', pin.id]);
+            }
             return Clutter.EVENT_STOP;
+        }
+        if ((key === Clutter.KEY_a || key === Clutter.KEY_A) &&
+            modifiers === Clutter.ModifierType.CONTROL_MASK) {
+            if (pin.hasOcrText()) {
+                pin.selectAllOcrText();
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
         }
         if ((key === Clutter.KEY_r || key === Clutter.KEY_R) &&
             modifiers === Clutter.ModifierType.SHIFT_MASK) {
@@ -233,12 +266,120 @@ export class PinManager {
             pin.resetScaleTo100();
             break;
         case Clutter.KEY_Escape:
-            this.closePin(pin.id, {notifyCore: true});
+            if (pin.hasTextSelection()) {
+                pin.clearTextSelection();
+            } else {
+                this.closePin(pin.id, {notifyCore: true});
+            }
             break;
         default:
             return Clutter.EVENT_PROPAGATE;
         }
         return Clutter.EVENT_STOP;
+    }
+
+    _handleOcrSettingChanged() {
+        if (this._destroyed || !this._settings) {
+            return;
+        }
+        this._ocrEnabled = this._settings.get_boolean('pin-ocr-enabled');
+        for (const pin of this._pins.values()) {
+            pin.setOcrModeEnabled(this._ocrEnabled);
+            if (this._ocrEnabled && !pin.hasOcrText() && pin.ocrStatus === 'idle') {
+                this.enqueuePinOcr(pin.id);
+            }
+        }
+    }
+
+    /**
+     * 串行排队执行后台离线 OCR（并发上限 1，防止连拍多张贴图打满 CPU）
+     */
+    enqueuePinOcr(id, options = {}) {
+        const {force = false} = options;
+        if (this._destroyed || !id || !this._pins.has(id)) {
+            return;
+        }
+        const existing = this._ocrQueue.find(item => item.id === id);
+        if (existing) {
+            existing.force = existing.force || force;
+        } else {
+            this._ocrQueue.push({id, force});
+        }
+        if (!this._ocrRunning) {
+            this._drainOcrQueue();
+        }
+    }
+
+    async _drainOcrQueue() {
+        if (this._ocrRunning || this._destroyed) {
+            return;
+        }
+        this._ocrRunning = true;
+        try {
+            while (!this._destroyed && this._ocrQueue.length > 0) {
+                const job = this._ocrQueue.shift();
+                if (!this._pins.has(job.id)) {
+                    continue;
+                }
+                const args = ['internal', 'ocr-pin', job.id];
+                if (job.force) {
+                    args.push('--force');
+                }
+                const result = await runPinshotAsync(args);
+                if (this._destroyed) {
+                    return;
+                }
+                const pin = this._pins.get(job.id);
+                if (!pin) {
+                    continue;
+                }
+                if (!result.ok || !result.stdout.trim()) {
+                    pin.setOcrStatus('idle');
+                    continue;
+                }
+                try {
+                    const reply = JSON.parse(result.stdout);
+                    if (reply.status === 'ok' && reply.document) {
+                        pin.setOcrDocument(reply.document);
+                        if (job.force) {
+                            pin.setOcrModeEnabled(true);
+                        }
+                    } else if (reply.status === 'missing_model') {
+                        pin.setOcrStatus('missing_model');
+                    } else if (reply.status === 'skipped') {
+                        pin.setOcrStatus('skipped');
+                    } else if (reply.status === 'unavailable') {
+                        pin.setOcrStatus('unavailable');
+                    } else {
+                        pin.setOcrStatus('idle');
+                    }
+                } catch (err) {
+                    console.warn(`[pinshot] 解析 OCR 响应失败 (${job.id}): ${err}`);
+                }
+            }
+        } finally {
+            this._ocrRunning = false;
+        }
+    }
+
+    async downloadOcrModelsAndRetry() {
+        if (this._destroyed || this._ocrDownloading) {
+            return;
+        }
+        this._ocrDownloading = true;
+        try {
+            const result = await runPinshotAsync(['internal', 'download-ocr-models']);
+            if (this._destroyed || !result.ok) {
+                return;
+            }
+            for (const pin of this._pins.values()) {
+                if (pin.ocrStatus === 'missing_model' || !pin.hasOcrText()) {
+                    this.enqueuePinOcr(pin.id);
+                }
+            }
+        } finally {
+            this._ocrDownloading = false;
+        }
     }
 
     _raisePin(pin) {
@@ -306,6 +447,17 @@ export class PinManager {
             }
             this._fullscreenSignalId = 0;
         }
+
+        if (this._ocrSettingId && this._settings) {
+            try {
+                this._settings.disconnect(this._ocrSettingId);
+            } catch (err) {
+                console.warn(`[pinshot] 断开 OCR 配置监听失败: ${err}`);
+            }
+            this._ocrSettingId = 0;
+        }
+        this._ocrQueue = [];
+        this._settings = null;
 
         if (this._monitorsSignalId) {
             try {

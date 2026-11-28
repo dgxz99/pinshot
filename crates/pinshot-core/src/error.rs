@@ -32,6 +32,10 @@ pub enum PinshotError {
     #[error("屏幕录制失败: {0}")]
     Longshot(String),
 
+    /// 本地离线 OCR 识别或模型管理失败
+    #[error("OCR 处理失败: {0}")]
+    Ocr(String),
+
     /// 未找到指定历史或贴图记录
     #[error("未找到指定记录: {0}")]
     NotFound(String),

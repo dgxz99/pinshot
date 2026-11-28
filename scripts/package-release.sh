@@ -73,7 +73,7 @@ fi
 ARCH="$(uname -m)"
 if [[ "$SKIP_BUILD" == false ]]; then
     echo "[pinshot] 正在编译 release 二进制 (${VERSION}, ${ARCH})..."
-    cargo build --release --locked --manifest-path "${REPO_ROOT}/Cargo.toml" -p pinshot-cli --features longshot
+    cargo build --release --locked --manifest-path "${REPO_ROOT}/Cargo.toml" -p pinshot-cli --features longshot,ocr
 fi
 
 BIN_SRC="${REPO_ROOT}/target/release/pinshot"
@@ -86,6 +86,7 @@ if ! "${BIN_SRC}" --version >/dev/null 2>&1 ||
    ! "${BIN_SRC}" capture-fullscreen --help >/dev/null 2>&1 ||
    ! "${BIN_SRC}" longshot --help >/dev/null 2>&1 ||
    ! "${BIN_SRC}" gif --help >/dev/null 2>&1 ||
+   ! "${BIN_SRC}" ocr status >/dev/null 2>&1 ||
    ! "${BIN_SRC}" internal probe-longshot --help >/dev/null 2>&1; then
     echo "[pinshot] Release 二进制子命令自检失败" >&2
     exit 1
@@ -125,6 +126,30 @@ install -m 0644 "${REPO_ROOT}/extensions/${EXT_UUID}/icons/pinshot.svg" \
     "${STAGE_DIR}/share/icons/hicolor/scalable/apps/${APP_ID}.svg"
 install -m 0644 "${REPO_ROOT}/LICENSE" "${STAGE_DIR}/LICENSE"
 install -m 0644 "${REPO_ROOT}/README.md" "${STAGE_DIR}/README.md"
+
+# 打包默认离线 OCR 模型（优先复用本地已校验模型，缺失时自动下载校验）
+OCR_MODEL_ID="ppocrv5-mobile"
+OCR_MODEL_SRC=""
+for candidate in \
+    "${PINSHOT_OCR_MODEL_DIR:-}" \
+    "${XDG_DATA_HOME:-${HOME}/.local/share}/pinshot/ocr/${OCR_MODEL_ID}" \
+    "/usr/share/pinshot/ocr/${OCR_MODEL_ID}"; do
+    if [[ -n "$candidate" \
+        && -f "${candidate}/det/inference.onnx" \
+        && -f "${candidate}/det/inference.yml" \
+        && -f "${candidate}/rec/inference.onnx" \
+        && -f "${candidate}/rec/inference.yml" ]]; then
+        OCR_MODEL_SRC="$candidate"
+        break
+    fi
+done
+if [[ -z "$OCR_MODEL_SRC" ]]; then
+    echo "[pinshot] 正在下载并校验默认离线 OCR 模型 (${OCR_MODEL_ID})..."
+    "${BIN_SRC}" ocr download-models --model "${OCR_MODEL_ID}"
+    OCR_MODEL_SRC="${XDG_DATA_HOME:-${HOME}/.local/share}/pinshot/ocr/${OCR_MODEL_ID}"
+fi
+mkdir -p "${STAGE_DIR}/share/pinshot/ocr"
+cp -r "${OCR_MODEL_SRC}" "${STAGE_DIR}/share/pinshot/ocr/${OCR_MODEL_ID}"
 
 mkdir -p "${OUT_DIR}"
 ARCHIVE_PATH="${OUT_DIR}/${BUNDLE_NAME}.tar.gz"

@@ -16,7 +16,7 @@ import {SHORTCUT_ACTIONS} from './shortcutActions.js';
 export default class PinshotExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._pinManager = new PinManager();
+        this._pinManager = new PinManager(this._settings);
         this._dbusService = new PinshotDbusService(this._pinManager, this._settings);
         this._dbusService.enable();
 

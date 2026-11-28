@@ -8,9 +8,9 @@ import {firePinshot} from './coreRunner.js';
  * 单张贴图右键上下文菜单（挂入 uiGroup，关闭后立即释放锚点）
  */
 export class PinContextMenu {
-    constructor(pinActor, requestClose) {
+    constructor(pinActor, callbacks) {
         this._pin = pinActor;
-        this._requestClose = requestClose;
+        this._callbacks = callbacks ?? {};
         this._anchor = null;
         this._menu = null;
         this._menuManager = null;
@@ -54,6 +54,13 @@ export class PinContextMenu {
     _populateItems() {
         const pin = this._pin;
 
+        if (pin.hasTextSelection()) {
+            this._menu.addAction('复制选中文字', () => {
+                pin.copySelectedText();
+            });
+            this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        }
+
         this._menu.addAction('复制图片', () => {
             firePinshot(['internal', 'copy-image', pin.id]);
         });
@@ -61,6 +68,24 @@ export class PinContextMenu {
         if (pin.hasText) {
             this._menu.addAction('复制原始文本', () => {
                 firePinshot(['internal', 'copy-text', pin.id]);
+            });
+        }
+
+        if (pin.hasOcrText()) {
+            this._menu.addAction('复制全部文字 (OCR)', () => {
+                pin.copyAllOcrText();
+            });
+            this._menu.addAction(
+                pin.ocrModeEnabled ? '暂时关闭划词（纯拖拽模式）' : '恢复划词选字',
+                () => pin.toggleOcrMode()
+            );
+        } else if (pin.ocrStatus === 'missing_model') {
+            this._menu.addAction('下载离线 OCR 模型（约 20 MB）', () => {
+                this._callbacks.onRequestDownloadOcrModels?.();
+            });
+        } else if (pin.ocrStatus !== 'unavailable') {
+            this._menu.addAction('识别图中文字 (OCR)', () => {
+                this._callbacks.onRequestForceOcr?.(pin.id);
             });
         }
 
@@ -92,7 +117,7 @@ export class PinContextMenu {
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._menu.addAction('关闭贴图', () => {
-            this._requestClose?.(pin.id);
+            this._callbacks.onRequestClose?.(pin.id);
         });
     }
 
@@ -133,6 +158,6 @@ export class PinContextMenu {
     destroy() {
         this.close();
         this._pin = null;
-        this._requestClose = null;
+        this._callbacks = null;
     }
 }

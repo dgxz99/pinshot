@@ -35,6 +35,15 @@ max_lines = 80
 prose_font = "Sans 12"
 code_font = "Monospace 11"
 padding_px = 16
+
+[ocr]
+enabled = true
+auto_on_pin = true
+model = "ppocrv5-mobile"
+model_dir = ""
+min_confidence = 0.6
+threads = 0
+max_image_edge_px = 4096
 "#;
 
 /// 应用总配置（对应 `~/.config/pinshot/config.toml`）
@@ -45,6 +54,7 @@ pub struct Config {
     pub cache: CacheConfig,
     pub pin: PinConfig,
     pub text_card: TextCardConfig,
+    pub ocr: OcrConfig,
 }
 
 /// 通用行为配置
@@ -159,6 +169,40 @@ impl Default for TextCardConfig {
     }
 }
 
+/// 离线贴图 OCR 配置（预留 model / model_dir 扩展切换模型）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OcrConfig {
+    /// 是否启用离线 OCR 能力
+    pub enabled: bool,
+    /// 贴图创建后是否自动后台执行 OCR（用于默认划词选字）
+    pub auto_on_pin: bool,
+    /// 当前模型 ID（对应 `<data_dir>/pinshot/ocr/<model>/`）
+    pub model: String,
+    /// 可选自定义模型目录（留空则按用户目录 → 系统目录查找）
+    pub model_dir: String,
+    /// 最低识别置信度阈值（0.0..=1.0，默认 0.60 过滤纯图标误检）
+    pub min_confidence: f32,
+    /// 推理线程数（0 表示自动）
+    pub threads: usize,
+    /// 自动后台 OCR 的图片最大单边像素上限（避免超长图打满 CPU）
+    pub max_image_edge_px: u32,
+}
+
+impl Default for OcrConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_on_pin: true,
+            model: "ppocrv5-mobile".to_string(),
+            model_dir: String::new(),
+            min_confidence: 0.6,
+            threads: 0,
+            max_image_edge_px: 4096,
+        }
+    }
+}
+
 impl Config {
     /// 返回默认配置文件路径：`~/.config/pinshot/config.toml`
     pub fn default_config_path() -> Result<PathBuf> {
@@ -230,6 +274,13 @@ impl Config {
         }
         if self.text_card.max_lines == 0 {
             self.text_card.max_lines = 1;
+        }
+        if self.ocr.model.trim().is_empty() {
+            self.ocr.model = "ppocrv5-mobile".to_string();
+        }
+        self.ocr.min_confidence = self.ocr.min_confidence.clamp(0.0, 1.0);
+        if self.ocr.max_image_edge_px < 512 {
+            self.ocr.max_image_edge_px = 512;
         }
     }
 }

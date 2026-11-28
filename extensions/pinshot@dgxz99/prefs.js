@@ -198,9 +198,22 @@ export default class PinshotPreferences extends ExtensionPreferences {
         });
         settings.bind('clipboard-image-device-pixels', devicePixels, 'active', Gio.SettingsBindFlags.DEFAULT);
         clipboard.add(devicePixels);
+
+        const ocrGroup = new Adw.PreferencesGroup({
+            title: '贴图划词（离线 OCR）',
+            description: '贴图后自动在后台识别文字，鼠标悬停文字上即可直接划词复制。',
+        });
+        const pinOcr = new Adw.SwitchRow({
+            title: '默认开启贴图划词选字',
+            subtitle: '关闭后贴图仅保留拖拽移动，仍可随时在贴图右键菜单手动识别。',
+        });
+        settings.bind('pin-ocr-enabled', pinOcr, 'active', Gio.SettingsBindFlags.DEFAULT);
+        ocrGroup.add(pinOcr);
+
         page.add(group);
         page.add(location);
         page.add(clipboard);
+        page.add(ocrGroup);
         return page;
     }
 
@@ -324,12 +337,13 @@ export default class PinshotPreferences extends ExtensionPreferences {
             description: '局部按键只在贴图接收到键盘事件时生效；也可使用右键菜单。开启穿透后可用上面的全局快捷键，或运行 pinshot unghost-all 解除。',
         });
         for (const [title, subtitle] of [
-            ['移动贴图', '左键拖动'],
-            ['关闭贴图', '双击左键或单击中键；贴图接收按键时也可按 Esc'],
+            ['移动贴图', '在空白区、边缘热区或按住 Alt 时左键拖动'],
+            ['划词选字', '鼠标移到文字上直接左键拖动选字；双击文字选中词块'],
+            ['关闭贴图', '双击空白区或单击中键；无文字选区时按 Esc'],
             ['调整大小／不透明度', '滚轮／Ctrl + 滚轮'],
             ['收起／展开迷你态', 'Shift + R'],
-            ['复制图片／Satty 标注', 'Ctrl + C／E'],
-            ['开启点击穿透／恢复原尺寸', 'T／0'],
+            ['复制图片或选中文字／全选文字', 'Ctrl + C／Ctrl + A'],
+            ['Satty 标注／点击穿透／原尺寸', 'E／T／0'],
         ]) {
             group.add(new Adw.ActionRow({title, subtitle}));
         }

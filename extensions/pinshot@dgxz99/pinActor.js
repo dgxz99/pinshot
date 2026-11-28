@@ -6,6 +6,18 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {PinContextMenu} from './contextMenu.js';
+import {
+    computeSelectionRects,
+    extractSelectedText,
+    hitTestText,
+    isInDragBorder,
+    locateCaret,
+    normalizeSelection,
+    prepareOcrDocument,
+    selectAll,
+    selectWordAt,
+    toImageCoords,
+} from './ocrSelection.js';
 
 const DOUBLE_CLICK_MS = 320;
 const DOUBLE_CLICK_MAX_DELTA = 8;
@@ -16,7 +28,7 @@ const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
  * 单张「真·非窗口」悬浮贴图（挂载在 uiGroup 顶层，严格遵守 4 条内存防泄漏红线）
  */
 export class PinActor {
-    constructor(payload, config, callbacks) {
+    constructor(payload, config, callbacks, options = {}) {
         this.id = payload.id;
         this._config = config;
         this._callbacks = callbacks;
@@ -53,8 +65,22 @@ export class PinActor {
         this._lastClickX = 0;
         this._lastClickY = 0;
 
+        this._ocrDoc = null;
+        this._ocrStatus = 'idle';
+        this._ocrModeEnabled = options.ocrEnabled !== false;
+        this._textSelection = null;
+        this._selectingText = false;
+        this._selectAnchor = null;
+        this._lastTextClickTimeUs = 0;
+        this._lastTextClickX = 0;
+        this._lastTextClickY = 0;
+        this._copyPill = null;
+        this._copyPillClickId = 0;
+
         this._actorSignalIds = [];
         this._stageDragSignalId = 0;
+        this._stageSelectSignalId = 0;
+        this._ocrRepaintId = 0;
         this._destroyed = false;
 
         this.actor = new St.Widget({
@@ -73,13 +99,27 @@ export class PinActor {
         });
         this.actor.add_child(this._imageWidget);
 
-        this._contextMenu = new PinContextMenu(this, callbacks.onRequestClose);
+        this._ocrCanvas = new St.DrawingArea({
+            x_expand: true,
+            y_expand: true,
+            reactive: false,
+        });
+        this._ocrRepaintId = this._ocrCanvas.connect('repaint', area => this._repaintOcrSelection(area));
+        this.actor.add_child(this._ocrCanvas);
+
+        this._contextMenu = new PinContextMenu(this, {
+            onRequestClose: id => callbacks.onRequestClose?.(id),
+            onRequestForceOcr: id => callbacks.onRequestForceOcr?.(id),
+            onRequestDownloadOcrModels: () => callbacks.onRequestDownloadOcrModels?.(),
+        });
 
         this._initGeometry(payload);
         this._loadFullTexture();
         this._applyOpacity(this._opacity);
         this._actorSignalIds = [
             this.actor.connect('button-press-event', (_actor, event) => this._onButtonPress(event)),
+            this.actor.connect('motion-event', (_actor, event) => this._onMotion(event)),
+            this.actor.connect('leave-event', () => this._onLeave()),
             this.actor.connect('scroll-event', (_actor, event) => this._onScroll(event)),
         ];
     }
@@ -90,6 +130,170 @@ export class PinActor {
 
     get ghost() {
         return this._ghost;
+    }
+
+    get ocrStatus() {
+        return this._ocrStatus;
+    }
+
+    get ocrModeEnabled() {
+        return this._ocrModeEnabled;
+    }
+
+    hasOcrText() {
+        return Boolean(this._ocrDoc && this._ocrDoc.lines.length > 0);
+    }
+
+    hasTextSelection() {
+        return Boolean(this._ocrDoc && this._textSelection);
+    }
+
+    ownsActor(actor) {
+        if (!actor) {
+            return false;
+        }
+        if (actor === this.actor) {
+            return true;
+        }
+        return Boolean(this._copyPill && (actor === this._copyPill || this._copyPill.contains(actor)));
+    }
+
+    setOcrStatus(status) {
+        if (this._destroyed) {
+            return;
+        }
+        this._ocrStatus = status;
+    }
+
+    setOcrDocument(rawDoc) {
+        if (this._destroyed) {
+            return;
+        }
+        this._ocrDoc = prepareOcrDocument(rawDoc);
+        this._ocrStatus = 'ready';
+        this.clearTextSelection();
+        this._refreshCursorFromPointer();
+    }
+
+    _refreshCursorFromPointer() {
+        if (this._destroyed || this._dragging || this._selectingText || this._ghost || !this.actor?.visible) {
+            return;
+        }
+        const [ptrX, ptrY, mods] = global.get_pointer();
+        const hit = this._hitTextAtStage(ptrX, ptrY, mods ?? 0);
+        if (hit) {
+            this.actor.set_cursor_type(Clutter.CursorType.TEXT);
+        }
+    }
+
+    setOcrModeEnabled(enabled) {
+        if (this._destroyed) {
+            return;
+        }
+        this._ocrModeEnabled = Boolean(enabled);
+        if (!this._ocrModeEnabled) {
+            this.clearTextSelection();
+            this._resetCursor();
+        }
+    }
+
+    toggleOcrMode() {
+        this.setOcrModeEnabled(!this._ocrModeEnabled);
+    }
+
+    selectAllOcrText() {
+        if (this._destroyed || !this._canSelectText()) {
+            return;
+        }
+        const all = selectAll(this._ocrDoc);
+        if (!all) {
+            return;
+        }
+        this._textSelection = all;
+        this._syncOcrOverlay(true);
+    }
+
+    clearTextSelection() {
+        this._stopTextSelect();
+        this._textSelection = null;
+        this._hideCopyPill();
+        this._ocrCanvas?.queue_repaint();
+    }
+
+    copySelectedText() {
+        if (this._destroyed || !this._ocrDoc || !this._textSelection) {
+            return false;
+        }
+        const text = extractSelectedText(this._ocrDoc, this._textSelection);
+        if (!text) {
+            return false;
+        }
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+        this.clearTextSelection();
+        return true;
+    }
+
+    copyAllOcrText() {
+        if (this._destroyed || !this.hasOcrText()) {
+            return false;
+        }
+        const all = selectAll(this._ocrDoc);
+        const text = extractSelectedText(this._ocrDoc, all);
+        if (!text) {
+            return false;
+        }
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
+        this.clearTextSelection();
+        return true;
+    }
+
+    _canSelectText() {
+        return !this._destroyed &&
+            !this._mini &&
+            !this._ghost &&
+            this._ocrModeEnabled &&
+            this.hasOcrText();
+    }
+
+    _hitTextAtStage(stageX, stageY, eventState = 0) {
+        if (!this._canSelectText() || (eventState & Clutter.ModifierType.MOD1_MASK)) {
+            return null;
+        }
+        const localX = stageX - this.actor.x;
+        const localY = stageY - this.actor.y;
+        const w = this.actor.width;
+        const h = this.actor.height;
+        if (localX < 0 || localY < 0 || localX > w || localY > h) {
+            return null;
+        }
+        if (isInDragBorder(localX, localY, w, h)) {
+            return null;
+        }
+        const {ix, iy} = toImageCoords(localX, localY, w, h, this._ocrDoc);
+        return hitTestText(this._ocrDoc, ix, iy);
+    }
+
+    _resetCursor() {
+        if (this.actor && !this._destroyed) {
+            this.actor.set_cursor_type(Clutter.CursorType.DEFAULT);
+        }
+    }
+
+    _onMotion(event) {
+        if (this._destroyed || this._dragging || this._selectingText || this._ghost) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+        const [stageX, stageY] = event.get_coords();
+        const hit = this._hitTextAtStage(stageX, stageY, event.get_state());
+        this.actor.set_cursor_type(hit ? Clutter.CursorType.TEXT : Clutter.CursorType.DEFAULT);
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _onLeave() {
+        if (!this._selectingText) {
+            this._resetCursor();
+        }
+        return Clutter.EVENT_PROPAGATE;
     }
 
     _scaledSize() {
@@ -157,6 +361,8 @@ export class PinActor {
 
         if (button === Clutter.BUTTON_SECONDARY) {
             this._lastClickTimeUs = 0;
+            this._lastTextClickTimeUs = 0;
+            this._hideCopyPill();
             this._callbacks?.onRaise?.(this);
             this._contextMenu.openAt(stageX, stageY);
             return Clutter.EVENT_STOP;
@@ -165,6 +371,35 @@ export class PinActor {
         if (button === Clutter.BUTTON_PRIMARY) {
             this._callbacks?.onRaise?.(this);
             this._callbacks?.onSelect?.(this);
+
+            const hit = this._hitTextAtStage(stageX, stageY, event.get_state());
+            if (hit) {
+                this._lastClickTimeUs = 0;
+                const nowUs = GLib.get_monotonic_time();
+                const dtMs = (nowUs - this._lastTextClickTimeUs) / 1000;
+                const dist = Math.hypot(stageX - this._lastTextClickX, stageY - this._lastTextClickY);
+                if (this._lastTextClickTimeUs !== 0 && dtMs > 0 &&
+                    dtMs <= DOUBLE_CLICK_MS && dist <= DOUBLE_CLICK_MAX_DELTA) {
+                    this._lastTextClickTimeUs = 0;
+                    const word = selectWordAt(this._ocrDoc, hit.lineIndex, hit.charIndex);
+                    if (word) {
+                        this._textSelection = word;
+                        this._syncOcrOverlay(true);
+                    }
+                    return Clutter.EVENT_STOP;
+                }
+
+                this._lastTextClickTimeUs = nowUs;
+                this._lastTextClickX = stageX;
+                this._lastTextClickY = stageY;
+                this._startTextSelect(hit);
+                return Clutter.EVENT_STOP;
+            }
+
+            this._lastTextClickTimeUs = 0;
+            if (this._textSelection) {
+                this.clearTextSelection();
+            }
 
             const nowUs = GLib.get_monotonic_time();
             const dtMs = (nowUs - this._lastClickTimeUs) / 1000;
@@ -186,6 +421,177 @@ export class PinActor {
         }
 
         return Clutter.EVENT_PROPAGATE;
+    }
+
+    _startTextSelect(anchor) {
+        this._stopTextSelect();
+        this._selectingText = true;
+        this._selectAnchor = anchor;
+        this._textSelection = null;
+        this._hideCopyPill();
+        this._ocrCanvas?.queue_repaint();
+        this.actor.set_cursor_type(Clutter.CursorType.TEXT);
+
+        this._stageSelectSignalId = global.stage.connect('captured-event', (_stage, event) => {
+            if (!this._selectingText || this._destroyed || !this._ocrDoc) {
+                return Clutter.EVENT_PROPAGATE;
+            }
+            const type = event.type();
+            if (type === Clutter.EventType.MOTION) {
+                const [curX, curY] = event.get_coords();
+                const localX = curX - this.actor.x;
+                const localY = curY - this.actor.y;
+                const {ix, iy} = toImageCoords(localX, localY, this.actor.width, this.actor.height, this._ocrDoc);
+                const focus = locateCaret(this._ocrDoc, ix, iy);
+                this._textSelection = normalizeSelection(this._selectAnchor, focus);
+                if (this._textSelection) {
+                    this._lastTextClickTimeUs = 0;
+                }
+                this._ocrCanvas?.queue_repaint();
+                return Clutter.EVENT_STOP;
+            }
+            if (type === Clutter.EventType.BUTTON_RELEASE &&
+                event.get_button() === Clutter.BUTTON_PRIMARY) {
+                this._stopTextSelect();
+                if (this._textSelection) {
+                    this._syncOcrOverlay(true);
+                } else {
+                    this._ocrCanvas?.queue_repaint();
+                }
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _stopTextSelect() {
+        this._selectingText = false;
+        this._selectAnchor = null;
+        if (this._stageSelectSignalId) {
+            try {
+                global.stage.disconnect(this._stageSelectSignalId);
+            } catch (err) {
+                console.warn(`[pinshot] 断开划词信号失败: ${err}`);
+            }
+            this._stageSelectSignalId = 0;
+        }
+    }
+
+    _repaintOcrSelection(area) {
+        const cr = area.get_context();
+        try {
+            if (!this._ocrDoc || !this._textSelection || this._mini || this._ghost) {
+                return;
+            }
+            const [width, height] = area.get_surface_size();
+            const rects = computeSelectionRects(this._ocrDoc, this._textSelection, width, height);
+            if (rects.length === 0) {
+                return;
+            }
+            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.36);
+            for (const r of rects) {
+                const rad = Math.min(3.0, r.width * 0.25, r.height * 0.25);
+                const x = r.x;
+                const y = r.y;
+                const w = r.width;
+                const h = r.height;
+                cr.newSubPath();
+                cr.arc(x + w - rad, y + rad, rad, -Math.PI / 2, 0);
+                cr.arc(x + w - rad, y + h - rad, rad, 0, Math.PI / 2);
+                cr.arc(x + rad, y + h - rad, rad, Math.PI / 2, Math.PI);
+                cr.arc(x + rad, y + rad, rad, Math.PI, (3 * Math.PI) / 2);
+                cr.closePath();
+                cr.fill();
+            }
+        } finally {
+            cr.$dispose();
+        }
+    }
+
+    _syncOcrOverlay(showPill = false) {
+        this._ocrCanvas?.queue_repaint();
+        if (!showPill || !this._ocrDoc || !this._textSelection || this._mini || this._ghost ||
+            this._tempHidden || this._fullscreenHidden) {
+            this._hideCopyPill();
+            return;
+        }
+        const rects = computeSelectionRects(this._ocrDoc, this._textSelection, this.actor.width, this.actor.height);
+        if (rects.length === 0) {
+            this._hideCopyPill();
+            return;
+        }
+        this._showCopyPill(rects);
+    }
+
+    _showCopyPill(rects) {
+        if (this._destroyed) {
+            return;
+        }
+        if (!this._copyPill) {
+            this._copyPill = new St.Button({
+                label: '复制',
+                style_class: 'pinshot-ocr-copy-pill',
+                reactive: true,
+                can_focus: false,
+            });
+            this._copyPillClickId = this._copyPill.connect('clicked', () => {
+                this.copySelectedText();
+            });
+            Main.layoutManager.uiGroup.add_child(this._copyPill);
+        }
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const r of rects) {
+            minX = Math.min(minX, r.x);
+            minY = Math.min(minY, r.y);
+            maxX = Math.max(maxX, r.x + r.width);
+            maxY = Math.max(maxY, r.y + r.height);
+        }
+
+        const stageMinX = this.actor.x + minX;
+        const stageMaxX = this.actor.x + maxX;
+        const stageMinY = this.actor.y + minY;
+        const stageMaxY = this.actor.y + maxY;
+
+        this._copyPill.show();
+        Main.layoutManager.uiGroup.set_child_above_sibling(this._copyPill, null);
+        const [, natW] = this._copyPill.get_preferred_width(-1);
+        const [, natH] = this._copyPill.get_preferred_height(-1);
+        const pillW = Math.max(44, Math.ceil(natW));
+        const pillH = Math.max(26, Math.ceil(natH));
+
+        const monitorIndex = this._findMonitorIndexAt((stageMinX + stageMaxX) / 2, (stageMinY + stageMaxY) / 2);
+        const workArea = Main.layoutManager.getWorkAreaForMonitor(monitorIndex);
+        const margin = 8;
+
+        let x = Math.round((stageMinX + stageMaxX - pillW) / 2);
+        let y = Math.round(stageMinY - pillH - margin);
+        if (y < workArea.y + 4) {
+            y = Math.round(stageMaxY + margin);
+        }
+        x = clamp(x, workArea.x + 4, workArea.x + Math.max(4, workArea.width - pillW - 4));
+        y = clamp(y, workArea.y + 4, workArea.y + Math.max(4, workArea.height - pillH - 4));
+        this._copyPill.set_position(x, y);
+    }
+
+    _hideCopyPill() {
+        if (!this._copyPill) {
+            return;
+        }
+        if (this._copyPillClickId) {
+            try {
+                this._copyPill.disconnect(this._copyPillClickId);
+            } catch (err) {
+                console.warn(`[pinshot] 断开复制按钮信号失败: ${err}`);
+            }
+            this._copyPillClickId = 0;
+        }
+        this._copyPill.get_parent()?.remove_child(this._copyPill);
+        this._copyPill.destroy();
+        this._copyPill = null;
     }
 
     _startDrag(stageX, stageY) {
@@ -298,6 +704,7 @@ export class PinActor {
 
         this.actor.set_size(newW, newH);
         this.actor.set_position(clamped.x, clamped.y);
+        this._syncOcrOverlay(Boolean(this._textSelection));
     }
 
     /**
@@ -321,6 +728,8 @@ export class PinActor {
         }
 
         if (!this._mini) {
+            this.clearTextSelection();
+            this._resetCursor();
             this._savedNormalState = {
                 x: this.actor.x,
                 y: this.actor.y,
@@ -369,6 +778,8 @@ export class PinActor {
 
         if (enabled) {
             this._stopDrag();
+            this.clearTextSelection();
+            this._resetCursor();
             this._contextMenu.close();
             this.setSelected(false);
             this._opacityBeforeGhost = this._opacity;
@@ -391,6 +802,7 @@ export class PinActor {
             this.actor.add_style_class_name('pinshot-pin-selected');
         } else {
             this.actor.remove_style_class_name('pinshot-pin-selected');
+            this.clearTextSelection();
         }
     }
 
@@ -408,7 +820,12 @@ export class PinActor {
         if (!this.actor) {
             return;
         }
-        this.actor.visible = !(this._tempHidden || this._fullscreenHidden);
+        const visible = !(this._tempHidden || this._fullscreenHidden);
+        this.actor.visible = visible;
+        if (!visible) {
+            this.clearTextSelection();
+            this._resetCursor();
+        }
     }
 
     /**
@@ -418,6 +835,10 @@ export class PinActor {
         if (this._destroyed) {
             return;
         }
+        this._ocrDoc = null;
+        this._ocrStatus = 'idle';
+        this.clearTextSelection();
+        this._resetCursor();
         this._imagePath = payload.image_path;
         this._thumbPath = payload.thumb_path;
         this._pixelWidth = Math.max(1, Number(payload.width) || this._pixelWidth);
@@ -623,6 +1044,10 @@ export class PinActor {
         }
         this._destroyed = true;
         this._stopDrag();
+        this._stopTextSelect();
+        this._hideCopyPill();
+        this._ocrDoc = null;
+        this._textSelection = null;
 
         if (this._contextMenu) {
             this._contextMenu.destroy();
@@ -630,6 +1055,7 @@ export class PinActor {
         }
 
         if (this.actor) {
+            this.actor.set_cursor_type(Clutter.CursorType.DEFAULT);
             for (const sigId of this._actorSignalIds) {
                 try {
                     this.actor.disconnect(sigId);
@@ -639,6 +1065,19 @@ export class PinActor {
             }
         }
         this._actorSignalIds = [];
+
+        if (this._ocrCanvas) {
+            if (this._ocrRepaintId) {
+                try {
+                    this._ocrCanvas.disconnect(this._ocrRepaintId);
+                } catch (err) {
+                    console.warn(`[pinshot] 断开 OCR 重绘信号失败: ${err}`);
+                }
+                this._ocrRepaintId = 0;
+            }
+            this._ocrCanvas.destroy();
+            this._ocrCanvas = null;
+        }
 
         this._releaseTexture();
         if (this._imageWidget) {

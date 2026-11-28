@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [features]
 longshot = ["pinshot-core/longshot"]
+ocr = ["pinshot-core/ocr"]
 
 [dependencies]
 anyhow.workspace = true

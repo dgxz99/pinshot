@@ -9,6 +9,7 @@ use pinshot_core::annotate;
 use pinshot_core::capture::ScrollAxis;
 use pinshot_core::capture::{self, CapturedImage, ScreenshotAction, ScreenshotSelection};
 use pinshot_core::clipboard::{self, ClipboardContent};
+use pinshot_core::ocr::{self, OCR_SCHEMA_VERSION, OcrPinResponse};
 use pinshot_core::protocol::PinKind;
 use pinshot_core::store::NewEntryRequest;
 use pinshot_core::text_render;
@@ -70,11 +71,36 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// 离线 OCR 识别与模型管理
+    Ocr {
+        #[command(subcommand)]
+        action: OcrCommands,
+    },
     /// 供前端按需回调的内部短命子命令
     #[command(hide = true)]
     Internal {
         #[command(subcommand)]
         action: InternalCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum OcrCommands {
+    /// 查看离线 OCR 引擎与模型状态
+    Status,
+    /// 下载并校验离线 OCR 模型到用户数据目录
+    DownloadModels {
+        /// 指定内置模型 ID（默认使用配置中的 ocr.model）
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// 对指定图片文件执行离线文字识别
+    Recognize {
+        /// 图片文件路径
+        image: std::path::PathBuf,
+        /// 输出包含坐标与字符区间的完整 JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -117,6 +143,15 @@ enum InternalCommands {
     GetPinConfig,
     /// 若配置开启 restore_on_startup，则恢复上次活跃贴图
     RestoreStartup,
+    /// 对指定贴图执行（或读取缓存的）离线 OCR，并输出 JSON 响应
+    OcrPin {
+        id: String,
+        /// 忽略缓存与尺寸跳过阈值，强制重新识别
+        #[arg(long)]
+        force: bool,
+    },
+    /// 下载默认离线 OCR 模型并通过桌面通知反馈进度
+    DownloadOcrModels,
 }
 
 fn main() -> Result<()> {
@@ -141,6 +176,7 @@ fn main() -> Result<()> {
         Commands::UnghostAll => cmd_unghost_all(),
         Commands::RestoreLast => cmd_restore_last(),
         Commands::ClearHistory { all } => cmd_clear_history(all),
+        Commands::Ocr { action } => handle_ocr(action),
         Commands::Internal { action } => handle_internal(action),
     }
 }
@@ -701,6 +737,157 @@ fn handle_internal(action: InternalCommands) -> Result<()> {
                 let _ = client.create_pin(&record.to_payload());
             }
             Ok(())
+        }
+        InternalCommands::OcrPin { id, force } => cmd_internal_ocr_pin(&id, force),
+        InternalCommands::DownloadOcrModels => cmd_internal_download_ocr_models(),
+    }
+}
+
+fn handle_ocr(action: OcrCommands) -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    match action {
+        OcrCommands::Status => {
+            println!(
+                "OCR 引擎: {}",
+                if ocr::engine_compiled() {
+                    "已启用 (PP-OCR ONNX / Pure Rust)"
+                } else {
+                    "未编译 (--features ocr)"
+                }
+            );
+            println!(
+                "配置状态: enabled={}, auto_on_pin={}",
+                cfg.ocr.enabled, cfg.ocr.auto_on_pin
+            );
+            println!("当前模型: {}", cfg.ocr.model);
+            match ocr::models::resolve_model_dir(&cfg.ocr)? {
+                Some(model) => {
+                    let mb =
+                        ocr::models::model_dir_size_bytes(&model.root) as f64 / (1024.0 * 1024.0);
+                    println!(
+                        "模型位置: {} ({:?}, {:.1} MB)",
+                        model.root.display(),
+                        model.source,
+                        mb
+                    );
+                }
+                None => {
+                    println!("模型状态: 未安装（可运行 `pinshot ocr download-models` 下载）");
+                }
+            }
+            Ok(())
+        }
+        OcrCommands::DownloadModels { model } => {
+            let model_id = model.as_deref().unwrap_or(&cfg.ocr.model);
+            let root = ocr::models::user_models_root()?;
+            eprintln!("正在下载并校验离线 OCR 模型 ({model_id})...");
+            let installed = ocr::models::download_builtin_model(model_id, &root)?;
+            println!("已就绪: {}", installed.display());
+            Ok(())
+        }
+        OcrCommands::Recognize { image, json } => {
+            #[cfg(feature = "ocr")]
+            {
+                let model = ocr::models::resolve_model_dir(&cfg.ocr)?.with_context(|| {
+                    format!(
+                        "未找到离线 OCR 模型 `{}`，请先运行 `pinshot ocr download-models`",
+                        cfg.ocr.model
+                    )
+                })?;
+                let doc = ocr::engine::recognize_image_file(&image, &model, &cfg.ocr)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&doc)?);
+                } else {
+                    println!("{}", doc.full_text());
+                }
+                Ok(())
+            }
+            #[cfg(not(feature = "ocr"))]
+            {
+                let _ = (image, json);
+                anyhow::bail!("此版本未启用离线 OCR 引擎（编译时需开启 --features ocr）")
+            }
+        }
+    }
+}
+
+fn cmd_internal_ocr_pin(id: &str, force: bool) -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    let reply = run_internal_ocr_pin(&cfg, id, force)?;
+    println!("{}", serde_json::to_string(&reply)?);
+    Ok(())
+}
+
+fn run_internal_ocr_pin(cfg: &Config, id: &str, force: bool) -> Result<OcrPinResponse> {
+    if !ocr::engine_compiled() {
+        return Ok(OcrPinResponse::Unavailable {
+            reason: "built_without_ocr".to_string(),
+        });
+    }
+    if !cfg.ocr.enabled || (!force && !cfg.ocr.auto_on_pin) {
+        return Ok(OcrPinResponse::Disabled);
+    }
+
+    let store = PinStore::open_default()?;
+    let record = store
+        .get(id)?
+        .with_context(|| format!("未找到贴图记录: {id}"))?;
+
+    if !force && record.width.max(record.height) > cfg.ocr.max_image_edge_px {
+        return Ok(OcrPinResponse::Skipped {
+            reason: "image_too_large".to_string(),
+        });
+    }
+
+    if !force
+        && let Some(cached) = store.load_ocr(id)?
+        && cached.version == OCR_SCHEMA_VERSION
+        && cached.model_id == cfg.ocr.model
+        && cached.image_width == record.width
+        && cached.image_height == record.height
+    {
+        return Ok(OcrPinResponse::Ok { document: cached });
+    }
+
+    let Some(model) = ocr::models::resolve_model_dir(&cfg.ocr)? else {
+        return Ok(OcrPinResponse::MissingModel {
+            model_id: cfg.ocr.model.clone(),
+        });
+    };
+
+    #[cfg(feature = "ocr")]
+    {
+        let doc = ocr::engine::recognize_image_file(&record.image_path, &model, &cfg.ocr)?;
+        let _ = store.save_ocr(id, &doc);
+        Ok(OcrPinResponse::Ok { document: doc })
+    }
+    #[cfg(not(feature = "ocr"))]
+    {
+        let _ = model;
+        Ok(OcrPinResponse::Unavailable {
+            reason: "built_without_ocr".to_string(),
+        })
+    }
+}
+
+fn cmd_internal_download_ocr_models() -> Result<()> {
+    let cfg = Config::load_or_init()?;
+    let root = ocr::models::user_models_root()?;
+    notify::info(
+        "Pinshot OCR",
+        &format!("正在下载离线 OCR 模型（{}，约 20 MB）...", cfg.ocr.model),
+    );
+    match ocr::models::download_builtin_model(&cfg.ocr.model, &root) {
+        Ok(path) => {
+            notify::info(
+                "Pinshot OCR",
+                &format!("离线 OCR 模型已就绪：{}", path.display()),
+            );
+            Ok(())
+        }
+        Err(err) => {
+            notify::warn("Pinshot OCR 模型下载失败", &err.to_string());
+            Err(err.into())
         }
     }
 }

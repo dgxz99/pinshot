@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::CacheConfig;
 use crate::error::{PinshotError, Result};
+use crate::ocr::OcrDocument;
 use crate::protocol::{PinKind, PinPayload};
 
 /// 缩略图最大边长（像素）
@@ -122,6 +123,14 @@ impl PinStore {
         self.root_dir.join("texts")
     }
 
+    fn ocr_dir(&self) -> PathBuf {
+        self.root_dir.join("ocr")
+    }
+
+    pub fn ocr_path(&self, id: &str) -> PathBuf {
+        self.ocr_dir().join(format!("{id}.json"))
+    }
+
     fn index_path(&self) -> PathBuf {
         self.root_dir.join("index.json")
     }
@@ -137,6 +146,7 @@ impl PinStore {
             self.images_dir(),
             self.thumbs_dir(),
             self.texts_dir(),
+            self.ocr_dir(),
         ] {
             if !dir.exists() {
                 fs::create_dir_all(&dir).map_err(|e| PinshotError::io(&dir, e))?;
@@ -276,10 +286,11 @@ impl PinStore {
             index.entries.push(backup_record);
         }
 
-        // 用新图片覆盖当前贴图绑定的文件
+        // 用新图片覆盖当前贴图绑定的文件，并作废旧 OCR 缓存
         let target = &mut index.entries[pos];
         write_file_private(&target.image_path, new_png_bytes)?;
         write_file_private(&target.thumb_path, &thumb_bytes)?;
+        let _ = remove_if_exists(&self.ocr_path(id));
 
         let text_bytes = target
             .text_path
@@ -305,6 +316,37 @@ impl PinStore {
     pub fn get(&self, id: &str) -> Result<Option<PinRecord>> {
         let index = self.load_index()?;
         Ok(index.entries.into_iter().find(|entry| entry.id == id))
+    }
+
+    /// 读取贴图对应的离线 OCR 缓存（不存在或损坏时返回 `Ok(None)`）
+    pub fn load_ocr(&self, id: &str) -> Result<Option<OcrDocument>> {
+        let path = self.ocr_path(id);
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(PinshotError::io(&path, err)),
+        };
+        match serde_json::from_str::<OcrDocument>(&raw) {
+            Ok(doc) => Ok(Some(doc)),
+            Err(_) => {
+                let _ = remove_if_exists(&path);
+                Ok(None)
+            }
+        }
+    }
+
+    /// 以 `0600` 权限原子写入贴图 OCR 缓存
+    pub fn save_ocr(&self, id: &str, doc: &OcrDocument) -> Result<()> {
+        self.ensure_layout()?;
+        let target = self.ocr_path(id);
+        let bytes = serde_json::to_vec(doc)?;
+        let mut temp = tempfile::NamedTempFile::new_in(self.ocr_dir())
+            .map_err(|e| PinshotError::io(&target, e))?;
+        temp.write_all(&bytes)
+            .map_err(|e| PinshotError::io(temp.path(), e))?;
+        temp.persist(&target)
+            .map_err(|e| PinshotError::io(&target, e.error))?;
+        Ok(())
     }
 
     /// 标记指定贴图为已关闭（保留在历史中以便捞回）
@@ -535,6 +577,9 @@ fn remove_record_files(record: &PinRecord) {
     let _ = remove_if_exists(&record.thumb_path);
     if let Some(text_path) = &record.text_path {
         let _ = remove_if_exists(text_path);
+    }
+    if let Some(root) = record.image_path.parent().and_then(Path::parent) {
+        let _ = remove_if_exists(&root.join("ocr").join(format!("{}.json", record.id)));
     }
 }
 
@@ -926,5 +971,58 @@ mod tests {
 
         store.clear_screencast_token().unwrap();
         assert_eq!(store.load_screencast_token().unwrap(), None);
+    }
+
+    #[test]
+    fn ocr_cache_persists_invalidates_on_replace_and_cleans_on_clear() {
+        let dir = TempDir::new().expect("创建临时目录失败");
+        let store = PinStore::open_at(dir.path().join("pinshot")).expect("打开缓存失败");
+        let cfg = CacheConfig::default();
+
+        let orig_png = make_test_png(120, 80, 1);
+        let edited_png = make_test_png(140, 90, 2);
+        let rec = store
+            .add_png_entry(
+                NewEntryRequest {
+                    kind: PinKind::Screenshot,
+                    png_bytes: &orig_png,
+                    text_content: None,
+                    title_preview: "ocr".to_string(),
+                    source_scale: 1.0,
+                    active: true,
+                },
+                &cfg,
+            )
+            .unwrap();
+
+        let doc = OcrDocument {
+            version: crate::ocr::OCR_SCHEMA_VERSION,
+            model_id: "ppocrv5-mobile".to_string(),
+            image_width: 120,
+            image_height: 80,
+            lines: vec![crate::ocr::OcrLine {
+                bbox: [10.0, 12.0, 80.0, 20.0],
+                text: "Pinshot".to_string(),
+                confidence: 0.99,
+                char_x: crate::ocr::layout::estimate_char_x("Pinshot"),
+                same_visual_line_next: false,
+            }],
+        };
+
+        assert_eq!(store.load_ocr(&rec.id).unwrap(), None);
+        store.save_ocr(&rec.id, &doc).unwrap();
+        assert_eq!(store.load_ocr(&rec.id).unwrap().as_ref(), Some(&doc));
+
+        // 标注回流替换原图时应自动作废旧 OCR 缓存
+        store
+            .replace_entry_image(&rec.id, &edited_png, &cfg)
+            .unwrap();
+        assert_eq!(store.load_ocr(&rec.id).unwrap(), None);
+
+        // 重新写入后清理历史应一并删除 OCR 缓存文件
+        store.save_ocr(&rec.id, &doc).unwrap();
+        assert!(store.ocr_path(&rec.id).exists());
+        store.clear_history(true).unwrap();
+        assert!(!store.ocr_path(&rec.id).exists());
     }
 }

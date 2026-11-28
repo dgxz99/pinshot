@@ -9,6 +9,7 @@ pub mod error;
 #[cfg(feature = "longshot")]
 pub mod longshot;
 pub mod notify;
+pub mod ocr;
 pub mod protocol;
 pub mod store;
 pub mod text_render;

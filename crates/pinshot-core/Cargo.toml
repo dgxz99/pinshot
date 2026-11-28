@@ -8,6 +8,7 @@ repository.workspace = true
 
 [features]
 longshot = ["dep:ashpd", "dep:futures-util", "dep:gif", "dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video", "dep:tokio"]
+ocr = ["dep:ndarray", "dep:pure-onnx-ocr"]
 
 [dependencies]
 ashpd = { workspace = true, optional = true }
@@ -20,6 +21,8 @@ gstreamer = { workspace = true, optional = true }
 gstreamer-app = { workspace = true, optional = true }
 gstreamer-video = { workspace = true, optional = true }
 image.workspace = true
+ndarray = { workspace = true, optional = true }
+pure-onnx-ocr = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

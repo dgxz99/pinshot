@@ -13,6 +13,7 @@ APPS_DIR="${DATA_DIR}/applications"
 DESKTOP_DEST="${APPS_DIR}/${APP_ID}.desktop"
 ICON_DIR="${DATA_DIR}/icons/hicolor/scalable/apps"
 ICON_DEST="${ICON_DIR}/${APP_ID}.svg"
+OCR_DATA_DIR="${DATA_DIR}/pinshot/ocr"
 
 USE_SYMLINK=false
 SKIP_BUILD=false
@@ -408,12 +409,28 @@ install_from_source() {
     local ext_src="${root}/extensions/${EXT_UUID}"
     if [[ "$SKIP_BUILD" == false ]]; then
         echo "[pinshot] 正在编译 release 二进制..."
-        cargo build --release --locked --manifest-path "${root}/Cargo.toml" -p pinshot-cli --features longshot
+        cargo build --release --locked --manifest-path "${root}/Cargo.toml" -p pinshot-cli --features longshot,ocr
     fi
     command -v glib-compile-schemas >/dev/null 2>&1 || { echo "[pinshot] 未找到 glib-compile-schemas" >&2; exit 1; }
     glib-compile-schemas --strict "${ext_src}/schemas"
     install_files "${root}/target/release/pinshot" "$ext_src" "${ext_src}/icons/pinshot.svg" "${root}/data/${APP_ID}.desktop"
+    ensure_default_ocr_model
     post_install
+}
+
+ensure_default_ocr_model() {
+    local model_id="ppocrv5-mobile"
+    if [[ -f "${OCR_DATA_DIR}/${model_id}/det/inference.onnx" && -f "${OCR_DATA_DIR}/${model_id}/rec/inference.onnx" ]] ||
+       [[ -f "/usr/share/pinshot/ocr/${model_id}/det/inference.onnx" && -f "/usr/share/pinshot/ocr/${model_id}/rec/inference.onnx" ]]; then
+        return 0
+    fi
+    if ! "${BIN_DIR}/pinshot" ocr status >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "[pinshot] 正在下载默认离线 OCR 模型（${model_id}）..."
+    if ! "${BIN_DIR}/pinshot" ocr download-models --model "${model_id}" >/dev/null 2>&1; then
+        echo "[pinshot] 提示：离线 OCR 模型下载失败，稍后可运行 pinshot ocr download-models 补齐" >&2
+    fi
 }
 
 install_from_release() {
@@ -471,6 +488,10 @@ install_from_release() {
         "${bundle_dir}/share/gnome-shell/extensions/${EXT_UUID}" \
         "${bundle_dir}/share/icons/hicolor/scalable/apps/${APP_ID}.svg" \
         "${bundle_dir}/share/applications/${APP_ID}.desktop"
+    if [[ -d "${bundle_dir}/share/pinshot/ocr" ]]; then
+        mkdir -p "${OCR_DATA_DIR}"
+        cp -rf "${bundle_dir}/share/pinshot/ocr/." "${OCR_DATA_DIR}/"
+    fi
     post_install
 }
 

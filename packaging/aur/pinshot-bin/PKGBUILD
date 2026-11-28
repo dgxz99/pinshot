@@ -38,6 +38,11 @@ package() {
   cp -r share/gnome-shell/extensions/pinshot@dgxz99 \
     "${pkgdir}/usr/share/gnome-shell/extensions/pinshot@dgxz99"
 
+  if [[ -d share/pinshot/ocr ]]; then
+    install -dm755 "${pkgdir}/usr/share/pinshot"
+    cp -r share/pinshot/ocr "${pkgdir}/usr/share/pinshot/ocr"
+  fi
+
   install -Dm644 share/applications/io.github.dgxz99.pinshot.desktop \
     "${pkgdir}/usr/share/applications/io.github.dgxz99.pinshot.desktop"
   install -Dm644 share/icons/hicolor/scalable/apps/io.github.dgxz99.pinshot.svg \

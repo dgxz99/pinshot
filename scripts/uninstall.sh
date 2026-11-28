@@ -12,6 +12,7 @@ DESKTOP_DEST="${APPS_DIR}/${APP_ID}.desktop"
 ICON_DEST="${DATA_DIR}/icons/hicolor/scalable/apps/${APP_ID}.svg"
 CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/pinshot"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/pinshot"
+OCR_DATA_DIR="${DATA_DIR}/pinshot"
 
 PURGE=false
 case "${PINSHOT_PURGE:-}" in
@@ -123,11 +124,11 @@ main() {
     fi
 
     if [[ "$PURGE" == true ]]; then
-        rm -rf "${CACHE_DIR}" "${CONFIG_DIR}"
+        rm -rf "${CACHE_DIR}" "${CONFIG_DIR}" "${OCR_DATA_DIR}"
         if command -v dconf >/dev/null 2>&1; then
             dconf reset -f "${DCONF_PATH}" 2>/dev/null || true
         fi
-        echo "[pinshot] 已完全清理缓存、配置与扩展设置（已导出的截图/GIF 保留）"
+        echo "[pinshot] 已完全清理缓存、配置、OCR 模型与扩展设置（已导出的截图/GIF 保留）"
     fi
 
     echo "[pinshot] 卸载完成"

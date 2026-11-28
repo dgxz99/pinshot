@@ -27,7 +27,7 @@ git tag v0.1.1
 git push origin v0.1.1
 ```
 
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) 会自动校验版本号、运行测试、打包出通用 `.tar.gz` 与 Arch `.pkg.tar.zst`，在发布正文底部自动附加折叠的 SHA-256 校验块，并发布 `Pinshot v0.1.1` Release（附带 `.tar.gz`、`.pkg.tar.zst` 与 `SHA256SUMS`）。
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) 会自动校验版本号、运行测试、编译包含 `longshot,ocr` 特性的二进制、拉取经 SHA-256 校验的默认离线 OCR 模型（`ppocrv5-mobile`）打进通用 `.tar.gz` 与 Arch `.pkg.tar.zst`，在发布正文底部自动附加折叠的 SHA-256 校验块，并发布对应 GitHub Release（附带 `.tar.gz`、`.pkg.tar.zst` 与 `SHA256SUMS`）。
 
 > 已发布的 tag 和压缩包请勿覆盖重打，以免破坏 AUR 用户的本地缓存校验；如有修复请递增补丁版本号（如 `v0.1.2`）。
 

@@ -198,9 +198,11 @@ jobs:
 
             sed -i \
               -e '/updpkgsums/d' \
+              -e '/^# 发布新 tag/d' \
               -e "s|^pkgver=.*|pkgver=${PKGVER}|" \
               -e "s|^pkgrel=.*|pkgrel=1|" \
-              -e "s|^${sha_key}=.*|${sha_key}=('${sha_val}')|" \
+              -e "s|'SKIP'|'${sha_val}'|" \
+              -e "s|^${sha_key}=('.*')|${sha_key}=('${sha_val}')|" \
               "${aur_dir}/PKGBUILD"
 
             docker run --rm -v "${aur_dir}:/work" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \

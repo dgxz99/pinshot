@@ -125,3 +125,23 @@
 .panel-button.pinshot-panel-button .system-status-icon {
     padding: 0;
 }
+
+.pinshot-ocr-copy-pill {
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background-color: rgba(34, 34, 42, 0.95);
+    border: 1px solid rgba(120, 174, 237, 0.72);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.42);
+}
+
+.pinshot-ocr-copy-pill:hover {
+    background-color: #3584e4;
+    border-color: #78aeed;
+}
+
+.pinshot-ocr-copy-pill:active {
+    background-color: #1c71d8;
+}
